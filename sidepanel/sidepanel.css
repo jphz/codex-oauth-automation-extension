@@ -260,6 +260,23 @@ header {
 .data-input::placeholder { color: var(--text-muted); }
 .data-input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); }
 
+.data-select {
+  flex: 1;
+  padding: 5px 8px;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 11px;
+  outline: none;
+  cursor: pointer;
+  transition: border-color var(--transition);
+  min-width: 0;
+}
+.data-select:focus { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); }
+[data-theme="dark"] .data-select { color-scheme: dark; }
+
 /* Status Bar */
 .status-bar {
   display: flex;

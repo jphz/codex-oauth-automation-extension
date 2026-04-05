@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Multi-Page Automation",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Automates multi-step OAuth registration workflow",
   "permissions": [
     "sidePanel",
@@ -12,14 +12,7 @@
     "activeTab"
   ],
   "host_permissions": [
-    "http://154.26.182.181:8317/*",
-    "https://auth0.openai.com/*",
-    "https://auth.openai.com/*",
-    "https://accounts.openai.com/*",
-    "https://mail.qq.com/*",
-    "https://wx.mail.qq.com/*",
-    "https://chatgpt.com/*",
-    "http://localhost/*"
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"
@@ -28,11 +21,6 @@
     "default_path": "sidepanel/sidepanel.html"
   },
   "content_scripts": [
-    {
-      "matches": ["http://154.26.182.181:8317/*"],
-      "js": ["content/utils.js", "content/vps-panel.js"],
-      "run_at": "document_idle"
-    },
     {
       "matches": [
         "https://auth0.openai.com/*",
@@ -48,6 +36,14 @@
         "https://wx.mail.qq.com/*"
       ],
       "js": ["content/utils.js", "content/qq-mail.js"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://mail.163.com/*"
+      ],
+      "js": ["content/utils.js", "content/mail-163.js"],
       "all_frames": true,
       "run_at": "document_idle"
     },

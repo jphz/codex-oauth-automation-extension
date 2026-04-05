@@ -19,6 +19,8 @@ const btnAutoRun = document.getElementById('btn-auto-run');
 const btnAutoContinue = document.getElementById('btn-auto-continue');
 const autoContinueBar = document.getElementById('auto-continue-bar');
 const btnClearLog = document.getElementById('btn-clear-log');
+const inputVpsUrl = document.getElementById('input-vps-url');
+const selectMailProvider = document.getElementById('select-mail-provider');
 
 // ============================================================
 // State Restore on load
@@ -38,6 +40,12 @@ async function restoreState() {
     }
     if (state.email) {
       inputEmail.value = state.email;
+    }
+    if (state.vpsUrl) {
+      inputVpsUrl.value = state.vpsUrl;
+    }
+    if (state.mailProvider) {
+      selectMailProvider.value = state.mailProvider;
     }
 
     if (state.stepStatuses) {
@@ -238,12 +246,26 @@ btnClearLog.addEventListener('click', () => {
   logArea.innerHTML = '';
 });
 
-// Save email on change
+// Save settings on change
 inputEmail.addEventListener('change', async () => {
   const email = inputEmail.value.trim();
   if (email) {
     await chrome.runtime.sendMessage({ type: 'SAVE_EMAIL', source: 'sidepanel', payload: { email } });
   }
+});
+
+inputVpsUrl.addEventListener('change', async () => {
+  const vpsUrl = inputVpsUrl.value.trim();
+  if (vpsUrl) {
+    await chrome.runtime.sendMessage({ type: 'SAVE_SETTING', source: 'sidepanel', payload: { vpsUrl } });
+  }
+});
+
+selectMailProvider.addEventListener('change', async () => {
+  await chrome.runtime.sendMessage({
+    type: 'SAVE_SETTING', source: 'sidepanel',
+    payload: { mailProvider: selectMailProvider.value },
+  });
 });
 
 // ============================================================

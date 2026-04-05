@@ -41,12 +41,23 @@
   <section id="data-section">
     <div class="data-card">
       <div class="data-row">
-        <span class="data-label">OAuth</span>
-        <span id="display-oauth-url" class="data-value mono truncate">Waiting...</span>
+        <span class="data-label">VPS</span>
+        <input type="text" id="input-vps-url" class="data-input" placeholder="http://ip:port/management.html#/oauth" />
+      </div>
+      <div class="data-row">
+        <span class="data-label">Mail</span>
+        <select id="select-mail-provider" class="data-select">
+          <option value="qq">QQ Mail (wx.mail.qq.com)</option>
+          <option value="163">163 Mail (mail.163.com)</option>
+        </select>
       </div>
       <div class="data-row">
         <span class="data-label">Email</span>
         <input type="text" id="input-email" class="data-input" placeholder="Paste DuckDuckGo email" />
+      </div>
+      <div class="data-row">
+        <span class="data-label">OAuth</span>
+        <span id="display-oauth-url" class="data-value mono truncate">Waiting...</span>
       </div>
       <div class="data-row">
         <span class="data-label">Callback</span>

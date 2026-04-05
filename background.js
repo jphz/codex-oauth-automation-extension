@@ -22,6 +22,8 @@ const DEFAULT_STATE = {
   flowStartTime: null,
   tabRegistry: {},
   logs: [],
+  vpsUrl: 'http://154.26.182.181:8317/management.html#/oauth',
+  mailProvider: 'qq', // 'qq' or '163'
 };
 
 async function getState() {
@@ -245,6 +247,14 @@ async function handleMessage(message, sender) {
       return { ok: true };
     }
 
+    case 'SAVE_SETTING': {
+      const updates = {};
+      if (message.payload.vpsUrl !== undefined) updates.vpsUrl = message.payload.vpsUrl;
+      if (message.payload.mailProvider !== undefined) updates.mailProvider = message.payload.mailProvider;
+      await setState(updates);
+      return { ok: true };
+    }
+
     // Side panel data updates
     case 'SAVE_EMAIL': {
       await setState({ email: message.payload.email });
@@ -445,17 +455,36 @@ async function resumeAutoRun() {
 // ============================================================
 
 async function executeStep1(state) {
+  const vpsUrl = state.vpsUrl;
+  if (!vpsUrl) {
+    throw new Error('No VPS URL configured. Enter VPS address in Side Panel first.');
+  }
+
   // Ensure VPS panel tab is open
   const alive = await isTabAlive('vps-panel');
   if (!alive) {
-    await addLog('Step 1: Opening VPS panel...');
-    await chrome.tabs.create({ url: 'http://154.26.182.181:8317/management.html#/oauth', active: true });
+    await addLog(`Step 1: Opening VPS panel: ${vpsUrl.slice(0, 60)}...`);
+    const tab = await chrome.tabs.create({ url: vpsUrl, active: true });
+    // Dynamically inject content scripts since VPS URL is configurable
+    // Wait for page to load, then inject
+    await new Promise(resolve => {
+      const listener = (tabId, info) => {
+        if (tabId === tab.id && info.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+    });
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ['content/utils.js', 'content/vps-panel.js'],
+    });
   } else {
     const tabId = await getTabId('vps-panel');
     if (tabId) await chrome.tabs.update(tabId, { active: true });
   }
 
-  // Send command — will queue if content script not ready yet, flush on READY signal
   await sendToContentScript('vps-panel', {
     type: 'EXECUTE_STEP',
     step: 1,
@@ -505,19 +534,27 @@ async function executeStep3(state) {
 // Step 4: Get Signup Verification Code (qq-mail.js polls, then fills in signup-page.js)
 // ============================================================
 
+function getMailConfig(state) {
+  const provider = state.mailProvider || 'qq';
+  if (provider === '163') {
+    return { source: 'mail-163', url: 'https://mail.163.com/', label: '163 Mail' };
+  }
+  return { source: 'qq-mail', url: 'https://wx.mail.qq.com/', label: 'QQ Mail' };
+}
+
 async function executeStep4(state) {
-  // Ensure QQ Mail tab is open
-  const alive = await isTabAlive('qq-mail');
+  const mail = getMailConfig(state);
+
+  const alive = await isTabAlive(mail.source);
   if (!alive) {
-    await addLog('Step 4: Opening QQ Mail...');
-    await chrome.tabs.create({ url: 'https://wx.mail.qq.com/', active: true });
+    await addLog(`Step 4: Opening ${mail.label}...`);
+    await chrome.tabs.create({ url: mail.url, active: true });
   } else {
-    const tabId = await getTabId('qq-mail');
+    const tabId = await getTabId(mail.source);
     if (tabId) await chrome.tabs.update(tabId, { active: true });
   }
 
-  // Send poll command to qq-mail
-  const result = await sendToContentScript('qq-mail', {
+  const result = await sendToContentScript(mail.source, {
     type: 'POLL_EMAIL',
     step: 4,
     source: 'background',
@@ -608,16 +645,18 @@ async function executeStep6(state) {
 // ============================================================
 
 async function executeStep7(state) {
-  const alive = await isTabAlive('qq-mail');
+  const mail = getMailConfig(state);
+
+  const alive = await isTabAlive(mail.source);
   if (!alive) {
-    await addLog('Step 7: Opening QQ Mail...');
-    await chrome.tabs.create({ url: 'https://wx.mail.qq.com/', active: true });
+    await addLog(`Step 7: Opening ${mail.label}...`);
+    await chrome.tabs.create({ url: mail.url, active: true });
   } else {
-    const tabId = await getTabId('qq-mail');
+    const tabId = await getTabId(mail.source);
     if (tabId) await chrome.tabs.update(tabId, { active: true });
   }
 
-  const result = await sendToContentScript('qq-mail', {
+  const result = await sendToContentScript(mail.source, {
     type: 'POLL_EMAIL',
     step: 7,
     source: 'background',
@@ -746,11 +785,26 @@ async function executeStep9(state) {
     throw new Error('No localhost URL. Complete step 8 first.');
   }
 
+  const vpsUrl = state.vpsUrl || 'http://154.26.182.181:8317/management.html#/oauth';
+
   // Switch to VPS panel tab
   const alive = await isTabAlive('vps-panel');
   if (!alive) {
     await addLog('Step 9: Opening VPS panel...');
-    await chrome.tabs.create({ url: 'http://154.26.182.181:8317/management.html#/oauth', active: true });
+    const tab = await chrome.tabs.create({ url: vpsUrl, active: true });
+    await new Promise(resolve => {
+      const listener = (tabId, info) => {
+        if (tabId === tab.id && info.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+    });
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ['content/utils.js', 'content/vps-panel.js'],
+    });
   } else {
     const tabId = await getTabId('vps-panel');
     if (tabId) await chrome.tabs.update(tabId, { active: true });

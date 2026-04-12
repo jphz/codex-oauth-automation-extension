@@ -1183,6 +1183,13 @@ function formatAutoRunScheduleTime(timestamp) {
   });
 }
 
+async function setAutoRunDelayEnabledState(enabled) {
+  const normalized = Boolean(enabled);
+  await setPersistentSettings({ autoRunDelayEnabled: normalized });
+  await setState({ autoRunDelayEnabled: normalized });
+  broadcastDataUpdate({ autoRunDelayEnabled: normalized });
+}
+
 async function ensureScheduledAutoRunAlarm(scheduledAt) {
   if (!Number.isFinite(scheduledAt) || scheduledAt <= Date.now()) {
     return false;
@@ -1274,6 +1281,9 @@ async function launchScheduledAutoRun(trigger = 'alarm') {
     }
 
     await clearScheduledAutoRunAlarm();
+    if (trigger !== 'manual' && state.autoRunDelayEnabled) {
+      await setAutoRunDelayEnabledState(false);
+    }
     await broadcastAutoRunStatus(
       'running',
       {

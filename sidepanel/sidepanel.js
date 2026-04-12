@@ -1223,6 +1223,13 @@ chrome.runtime.onMessage.addListener((message) => {
         displayLocalhostUrl.textContent = message.payload.localhostUrl;
         displayLocalhostUrl.classList.add('has-value');
       }
+      if (message.payload.autoRunDelayEnabled !== undefined) {
+        inputAutoDelayEnabled.checked = Boolean(message.payload.autoRunDelayEnabled);
+        updateAutoDelayInputState();
+      }
+      if (message.payload.autoRunDelayMinutes !== undefined) {
+        inputAutoDelayMinutes.value = String(normalizeAutoDelayMinutes(message.payload.autoRunDelayMinutes));
+      }
       break;
     }
 

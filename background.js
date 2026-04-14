@@ -28,7 +28,7 @@ const HOTMAIL_MAILBOXES = ['INBOX', 'Junk'];
 const STOP_ERROR_MESSAGE = '流程已被用户停止。';
 const HUMAN_STEP_DELAY_MIN = 700;
 const HUMAN_STEP_DELAY_MAX = 2200;
-const STEP7_RESTART_MAX_ROUNDS = 8;
+const STEP7_MAIL_POLLING_RECOVERY_MAX_ATTEMPTS = 8;
 const SUB2API_STEP1_RESPONSE_TIMEOUT_MS = 90000;
 const SUB2API_STEP9_RESPONSE_TIMEOUT_MS = 120000;
 const DEFAULT_SUB2API_URL = 'https://sub2api.hisence.fun/admin/accounts';
@@ -2206,10 +2206,6 @@ function getStep7RestartFromStep6Error(result) {
 function isStep7RestartFromStep6Error(error) {
   return error?.code === STEP7_RESTART_FROM_STEP6_ERROR_CODE
     || Boolean(parseStep7RestartFromStep6Marker(error));
-}
-
-function isStep7RecoverableError(error) {
-  return isVerificationMailPollingError(error) || isStep7RestartFromStep6Error(error);
 }
 
 function isRestartCurrentAttemptError(error) {
@@ -5227,43 +5223,48 @@ async function rerunStep6ForStep7Recovery() {
 }
 
 async function executeStep7(state) {
-  let lastError = null;
+  let currentState = state;
+  let mailPollingAttempt = 1;
+  let lastMailPollingError = null;
 
-  for (let round = 1; round <= STEP7_RESTART_MAX_ROUNDS; round++) {
-    const currentState = round === 1 ? state : await getState();
-
+  while (true) {
     try {
-      if (round > 1) {
-        await addLog(`步骤 7：正在进行第 ${round}/${STEP7_RESTART_MAX_ROUNDS} 轮登录验证码恢复尝试。`, 'warn');
-      }
       await runStep7Attempt(currentState);
       return;
     } catch (err) {
-      lastError = err;
+      if (isStep7RestartFromStep6Error(err)) {
+        await addLog('步骤 7：检测到登录页超时报错，准备从步骤 6 重新开始...', 'warn');
+        await rerunStep6ForStep7Recovery();
+        currentState = await getState();
+        continue;
+      }
 
-      if (!isStep7RecoverableError(err)) {
+      if (!isVerificationMailPollingError(err)) {
         throw err;
       }
 
-      if (round >= STEP7_RESTART_MAX_ROUNDS) {
+      lastMailPollingError = err;
+      if (mailPollingAttempt >= STEP7_MAIL_POLLING_RECOVERY_MAX_ATTEMPTS) {
         break;
       }
 
+      mailPollingAttempt += 1;
       await addLog(
-        isStep7RestartFromStep6Error(err)
-          ? `步骤 7：检测到登录页超时报错，准备从步骤 6 重新开始（${round + 1}/${STEP7_RESTART_MAX_ROUNDS}）...`
-          : `步骤 7：检测到邮箱轮询类失败，准备从步骤 6 重新开始（${round + 1}/${STEP7_RESTART_MAX_ROUNDS}）...`,
+        `步骤 7：检测到邮箱轮询类失败，准备从步骤 6 重新开始（${mailPollingAttempt}/${STEP7_MAIL_POLLING_RECOVERY_MAX_ATTEMPTS}）...`,
         'warn'
       );
       await rerunStep6ForStep7Recovery();
+      currentState = await getState();
     }
   }
 
-  if (lastError && isStep7RecoverableError(lastError)) {
-    throw new Error(`步骤 7：登录验证码流程在 ${STEP7_RESTART_MAX_ROUNDS} 轮恢复后仍未成功。最后一次原因：${lastError.message}`);
+  if (lastMailPollingError) {
+    throw new Error(
+      `步骤 7：登录验证码流程在 ${STEP7_MAIL_POLLING_RECOVERY_MAX_ATTEMPTS} 轮邮箱轮询恢复后仍未成功。最后一次原因：${lastMailPollingError.message}`
+    );
   }
 
-  throw lastError || new Error(`步骤 7：登录验证码流程在 ${STEP7_RESTART_MAX_ROUNDS} 轮后仍未成功。`);
+  throw new Error('步骤 7：登录验证码流程未成功完成。');
 }
 
 // ============================================================

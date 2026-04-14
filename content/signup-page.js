@@ -529,10 +529,6 @@ function isAddPhonePageReady() {
   return ADD_PHONE_PAGE_PATTERN.test(getPageTextSnapshot());
 }
 
-function isLoginPage() {
-  return /\/log-in(?:[/?#]|$)/i.test(location.pathname || '');
-}
-
 function isStep8Ready() {
   const continueBtn = getPrimaryContinueButton();
   if (!continueBtn) return false;
@@ -691,19 +687,51 @@ function getAuthRetryButton({ allowDisabled = false } = {}) {
   }) || null;
 }
 
-function matchesAuthTimeoutErrorPage(pathPattern) {
-  if (!pathPattern.test(location.pathname || '')) return false;
+function getAuthTimeoutErrorPageState(options = {}) {
+  const { pathPatterns = [] } = options;
+  const path = location.pathname || '';
+  if (pathPatterns.length && !pathPatterns.some((pattern) => pattern.test(path))) {
+    return null;
+  }
+
+  const retryButton = getAuthRetryButton({ allowDisabled: true });
+  if (!retryButton) {
+    return null;
+  }
+
   const text = getPageTextSnapshot();
-  return Boolean(
-    getAuthRetryButton({ allowDisabled: true })
-    && (AUTH_TIMEOUT_ERROR_TITLE_PATTERN.test(text)
-      || AUTH_TIMEOUT_ERROR_DETAIL_PATTERN.test(text)
-      || AUTH_TIMEOUT_ERROR_TITLE_PATTERN.test(document.title || ''))
-  );
+  const titleMatched = AUTH_TIMEOUT_ERROR_TITLE_PATTERN.test(text)
+    || AUTH_TIMEOUT_ERROR_TITLE_PATTERN.test(document.title || '');
+  const detailMatched = AUTH_TIMEOUT_ERROR_DETAIL_PATTERN.test(text);
+
+  if (!titleMatched && !detailMatched) {
+    return null;
+  }
+
+  return {
+    path,
+    url: location.href,
+    retryButton,
+    retryEnabled: isActionEnabled(retryButton),
+    titleMatched,
+    detailMatched,
+  };
+}
+
+function getSignupPasswordTimeoutErrorPageState() {
+  return getAuthTimeoutErrorPageState({
+    pathPatterns: [/\/create-account\/password(?:[/?#]|$)/i],
+  });
+}
+
+function getLoginTimeoutErrorPageState() {
+  return getAuthTimeoutErrorPageState({
+    pathPatterns: [/\/log-in(?:[/?#]|$)/i],
+  });
 }
 
 function isSignupPasswordErrorPage() {
-  return matchesAuthTimeoutErrorPage(/\/create-account\/password(?:[/?#]|$)/i);
+  return Boolean(getSignupPasswordTimeoutErrorPageState());
 }
 
 function buildStep7RestartFromStep6Marker(reason, url = location.href) {
@@ -711,15 +739,16 @@ function buildStep7RestartFromStep6Marker(reason, url = location.href) {
 }
 
 function getStep7RestartFromStep6Signal() {
-  if (!isLoginPage() || !matchesAuthTimeoutErrorPage(/\/log-in(?:[/?#]|$)/i)) {
+  const timeoutPage = getLoginTimeoutErrorPageState();
+  if (!timeoutPage) {
     return null;
   }
 
   return {
-    error: buildStep7RestartFromStep6Marker('login_timeout_error_page', location.href),
+    error: buildStep7RestartFromStep6Marker('login_timeout_error_page', timeoutPage.url),
     restartFromStep6: true,
     reason: 'login_timeout_error_page',
-    url: location.href,
+    url: timeoutPage.url,
   };
 }
 
@@ -737,9 +766,10 @@ function inspectSignupVerificationState() {
   }
 
   if (isSignupPasswordErrorPage()) {
+    const timeoutPage = getSignupPasswordTimeoutErrorPageState();
     return {
       state: 'error',
-      retryButton: getAuthRetryButton({ allowDisabled: true }),
+      retryButton: timeoutPage?.retryButton || null,
     };
   }
 

@@ -4,7 +4,7 @@ console.log('[MultiPage:sub2api-panel] Content script loaded on', location.href)
 
 const SUB2API_PANEL_LISTENER_SENTINEL = 'data-multipage-sub2api-panel-listener';
 const SUB2API_DEFAULT_GROUP_NAME = 'codex';
-const SUB2API_DEFAULT_PROXY_NAME = 'shadowrocket';
+const SUB2API_DEFAULT_PROXY_NAME = '';
 const SUB2API_DEFAULT_REDIRECT_URI = 'http://localhost:1455/auth/callback';
 const SUB2API_DEFAULT_CONCURRENCY = 10;
 const SUB2API_DEFAULT_PRIORITY = 1;
@@ -195,10 +195,10 @@ function normalizeSub2ApiProxyPreference(value) {
 
 function resolveSub2ApiProxyPreference(payload = {}, backgroundState = {}) {
   if (payload.sub2apiDefaultProxyName !== undefined) {
-    return normalizeSub2ApiProxyPreference(payload.sub2apiDefaultProxyName) || SUB2API_DEFAULT_PROXY_NAME;
+    return normalizeSub2ApiProxyPreference(payload.sub2apiDefaultProxyName);
   }
   if (backgroundState.sub2apiDefaultProxyName !== undefined) {
-    return normalizeSub2ApiProxyPreference(backgroundState.sub2apiDefaultProxyName) || SUB2API_DEFAULT_PROXY_NAME;
+    return normalizeSub2ApiProxyPreference(backgroundState.sub2apiDefaultProxyName);
   }
   return SUB2API_DEFAULT_PROXY_NAME;
 }
@@ -327,9 +327,9 @@ async function resolveSub2ApiProxy(origin, token, preference = '') {
     throw new Error(`SUB2API 默认代理“${configured}”不存在或未启用。可用代理：${available}`);
   }
   if (reason === 'no-preference') {
-    throw new Error(`SUB2API 存在多个可用代理，请在侧边栏填写默认代理名称或 ID。可用代理：${available}`);
+    throw new Error(`SUB2API 存在多个可用代理，请在侧边栏填写默认代理名称或 ID；留空则不使用代理。可用代理：${available}`);
   }
-  throw new Error('SUB2API 没有可用代理；当前流程要求账号必须绑定代理。');
+  throw new Error('SUB2API 没有可用代理；请检查默认代理配置，或将其留空以禁用代理。');
 }
 
 function buildDraftAccountName(groupName) {
@@ -451,21 +451,29 @@ async function step1_generateOpenAiAuthUrl(payload = {}, options = {}) {
   const { origin, token } = await loginSub2Api(payload);
   const group = await getGroupByName(origin, token, groupName);
   const proxyPreference = resolveSub2ApiProxyPreference(payload);
-  const proxy = await resolveSub2ApiProxy(origin, token, proxyPreference);
-  const proxyId = normalizeProxyId(proxy.id);
+  const proxy = proxyPreference ? await resolveSub2ApiProxy(origin, token, proxyPreference) : null;
+  const proxyId = normalizeProxyId(proxy?.id);
   const draftName = buildDraftAccountName(group.name || groupName);
 
   log(`步骤 ${logStep}：已登录 SUB2API，使用分组 ${group.name}（#${group.id}）。`);
-  log(`步骤 ${logStep}：已选择 SUB2API 默认代理 ${buildProxyDisplayName(proxy)}。`);
+  if (proxy) {
+    log(`步骤 ${logStep}：已选择 SUB2API 默认代理 ${buildProxyDisplayName(proxy)}。`);
+  } else {
+    log(`步骤 ${logStep}：未配置 SUB2API 默认代理，本次将不使用代理。`);
+  }
   log(`步骤 ${logStep}：正在向 SUB2API 生成 OpenAI Auth 链接，回调地址为 ${redirectUri}。`);
+
+  const authRequestBody = {
+    redirect_uri: redirectUri,
+  };
+  if (proxyId) {
+    authRequestBody.proxy_id = proxyId;
+  }
 
   const authData = await requestJson(origin, '/api/v1/admin/openai/generate-auth-url', {
     method: 'POST',
     token,
-    body: {
-      redirect_uri: redirectUri,
-      proxy_id: proxyId,
-    },
+    body: authRequestBody,
   });
 
   const oauthUrl = String(authData?.auth_url || '').trim();
@@ -506,8 +514,9 @@ async function step9_submitOpenAiCallback(payload = {}) {
   const { origin, token } = await loginSub2Api(payload);
   const proxyPreference = resolveSub2ApiProxyPreference(payload, backgroundState);
   const preferredProxyId = normalizeProxyId(payload.sub2apiProxyId || backgroundState.sub2apiProxyId);
-  const proxy = await resolveSub2ApiProxy(origin, token, preferredProxyId || proxyPreference);
-  const proxyId = normalizeProxyId(proxy.id);
+  const proxySelector = preferredProxyId || proxyPreference;
+  const proxy = proxySelector ? await resolveSub2ApiProxy(origin, token, proxySelector) : null;
+  const proxyId = normalizeProxyId(proxy?.id);
   const group = payload.sub2apiGroupId
     ? { id: payload.sub2apiGroupId, name: payload.sub2apiGroupName || backgroundState.sub2apiGroupName || SUB2API_DEFAULT_GROUP_NAME }
     : await getGroupByName(origin, token, payload.sub2apiGroupName || backgroundState.sub2apiGroupName || SUB2API_DEFAULT_GROUP_NAME);
@@ -520,16 +529,23 @@ async function step9_submitOpenAiCallback(payload = {}) {
   }
 
   log('步骤 10：正在向 SUB2API 交换 OpenAI 授权码...');
-  log(`步骤 10：使用 SUB2API 默认代理 ${buildProxyDisplayName(proxy)}。`);
+  if (proxy) {
+    log(`步骤 10：使用 SUB2API 默认代理 ${buildProxyDisplayName(proxy)}。`);
+  } else {
+    log('步骤 10：未配置 SUB2API 默认代理，本次将不使用代理。');
+  }
+  const exchangeRequestBody = {
+    session_id: sessionId,
+    code: callback.code,
+    state: callback.state,
+  };
+  if (proxyId) {
+    exchangeRequestBody.proxy_id = proxyId;
+  }
   const exchangeData = await requestJson(origin, '/api/v1/admin/openai/exchange-code', {
     method: 'POST',
     token,
-    body: {
-      session_id: sessionId,
-      code: callback.code,
-      state: callback.state,
-      proxy_id: proxyId,
-    },
+    body: exchangeRequestBody,
   });
 
   const credentials = buildOpenAiCredentials(exchangeData);
@@ -547,10 +563,12 @@ async function step9_submitOpenAiCallback(payload = {}) {
     concurrency: SUB2API_DEFAULT_CONCURRENCY,
     priority: SUB2API_DEFAULT_PRIORITY,
     rate_multiplier: SUB2API_DEFAULT_RATE_MULTIPLIER,
-    proxy_id: proxyId,
     group_ids: [groupId],
     auto_pause_on_expired: true,
   };
+  if (proxyId) {
+    createPayload.proxy_id = proxyId;
+  }
 
   if (extra) {
     createPayload.extra = extra;

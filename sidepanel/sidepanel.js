@@ -205,7 +205,6 @@ const VERIFICATION_RESEND_COUNT_MAX = 20;
 const DEFAULT_VERIFICATION_RESEND_COUNT = 4;
 const DEFAULT_LOCAL_CPA_STEP9_MODE = 'submit';
 const DEFAULT_CPA_CALLBACK_MODE = 'step8';
-const DEFAULT_SUB2API_PROXY_NAME = 'shadowrocket';
 const MAIL_2925_MODE_PROVIDE = 'provide';
 const MAIL_2925_MODE_RECEIVE = 'receive';
 const DEFAULT_MAIL_2925_MODE = MAIL_2925_MODE_PROVIDE;
@@ -1310,7 +1309,7 @@ function collectSettingsPayload() {
     sub2apiEmail: inputSub2ApiEmail.value.trim(),
     sub2apiPassword: inputSub2ApiPassword.value,
     sub2apiGroupName: inputSub2ApiGroup.value.trim(),
-    sub2apiDefaultProxyName: inputSub2ApiDefaultProxy.value.trim() || DEFAULT_SUB2API_PROXY_NAME,
+    sub2apiDefaultProxyName: inputSub2ApiDefaultProxy.value.trim(),
     customPassword: inputPassword.value,
     mailProvider: selectMailProvider.value,
     mail2925Mode: getSelectedMail2925Mode(),
@@ -1681,7 +1680,7 @@ function applySettingsState(state) {
   inputSub2ApiEmail.value = state?.sub2apiEmail || '';
   inputSub2ApiPassword.value = state?.sub2apiPassword || '';
   inputSub2ApiGroup.value = state?.sub2apiGroupName || '';
-  inputSub2ApiDefaultProxy.value = state?.sub2apiDefaultProxyName || DEFAULT_SUB2API_PROXY_NAME;
+  inputSub2ApiDefaultProxy.value = state?.sub2apiDefaultProxyName || '';
   const restoredMailProvider = isCustomMailProvider(state?.mailProvider)
     || [ICLOUD_PROVIDER, 'hotmail-api', GMAIL_PROVIDER, 'luckmail-api', '163', '163-vip', 'qq', 'inbucket', '2925', 'cloudflare-temp-email'].includes(String(state?.mailProvider || '').trim())
     ? String(state?.mailProvider || '163').trim()

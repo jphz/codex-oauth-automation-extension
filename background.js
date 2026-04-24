@@ -3113,6 +3113,16 @@ async function pollLuckmailVerificationCode(step, state, pollPayload = {}) {
     excludeCodes: pollPayload.excludeCodes || [],
   };
 
+  const initialCursor = normalizeLuckmailMailCursor((await getState()).currentLuckmailMailCursor);
+  if (!initialCursor.messageId && !initialCursor.receivedAt) {
+    const mailList = await client.user.getTokenMails(purchase.token);
+    const baselineCursor = buildLuckmailBaselineCursor(mailList?.mails || []);
+    await setLuckmailMailCursorState(baselineCursor);
+    if (baselineCursor?.messageId || baselineCursor?.receivedAt) {
+      await addLog(`步骤 ${step}：LuckMail 已保存当前邮箱旧邮件快照，后续仅使用新收到的验证码。`, 'info');
+    }
+  }
+
   let lastError = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     throwIfStopped();

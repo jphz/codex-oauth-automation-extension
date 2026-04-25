@@ -32,9 +32,10 @@ if (document.documentElement.getAttribute(SIGNUP_PAGE_LISTENER_SENTINEL) !== '1'
       handleCommand(message).then((result) => {
         sendResponse({ ok: true, ...(result || {}) });
       }).catch(err => {
+        const reportedStep = Number(message.payload?.visibleStep) || message.step;
         if (isStopError(err)) {
-          if (message.step) {
-            log(`步骤 ${message.step || 8}：已被用户停止。`, 'warn');
+          if (reportedStep) {
+            log(`步骤 ${reportedStep || 8}：已被用户停止。`, 'warn');
           }
           sendResponse({ stopped: true, error: err.message });
           return;
@@ -46,8 +47,8 @@ if (document.documentElement.getAttribute(SIGNUP_PAGE_LISTENER_SENTINEL) !== '1'
           return;
         }
 
-        if (message.step) {
-          reportError(message.step, err.message);
+        if (reportedStep) {
+          reportError(reportedStep, err.message);
         }
         sendResponse({ error: err.message });
       });

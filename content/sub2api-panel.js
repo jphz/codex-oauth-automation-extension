@@ -68,7 +68,8 @@ async function handleStep(step, payload = {}) {
     case 1:
       return step1_generateOpenAiAuthUrl(payload);
     case 10:
-      return step9_submitOpenAiCallback(payload);
+    case 12:
+      return step9_submitOpenAiCallback({ ...(payload || {}), visibleStep: step });
     default:
       throw new Error(`sub2api-panel.js 不处理步骤 ${step}`);
   }
@@ -501,6 +502,7 @@ async function step1_generateOpenAiAuthUrl(payload = {}, options = {}) {
 }
 
 async function step9_submitOpenAiCallback(payload = {}) {
+  const visibleStep = Number(payload?.visibleStep) || 10;
   const callback = parseLocalhostCallback(payload.localhostUrl || '');
   const backgroundState = await getBackgroundState();
   const flowEmail = String(backgroundState.email || '').trim();
@@ -574,7 +576,7 @@ async function step9_submitOpenAiCallback(payload = {}) {
     createPayload.extra = extra;
   }
 
-  log(`步骤 10：授权码交换成功，正在创建 SUB2API 账号（名称：${accountName}）...`);
+  log(`步骤 ${visibleStep}：授权码交换成功，正在创建 SUB2API 账号（名称：${accountName}）...`);
   const createdAccount = await requestJson(origin, '/api/v1/admin/accounts', {
     method: 'POST',
     token,
@@ -582,8 +584,8 @@ async function step9_submitOpenAiCallback(payload = {}) {
   });
 
   const verifiedStatus = `SUB2API 已创建账号 #${createdAccount?.id || 'unknown'}`;
-  log(`步骤 10：${verifiedStatus}`, 'ok');
-  reportComplete(10, {
+  log(`步骤 ${visibleStep}：${verifiedStatus}`, 'ok');
+  reportComplete(visibleStep, {
     localhostUrl: callback.url,
     verifiedStatus,
   });

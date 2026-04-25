@@ -40,6 +40,9 @@
       getPendingAutoRunTimerPlan,
       getSourceLabel,
       getState,
+      getStepDefinitionForState,
+      getStepIdsForState,
+      getLastStepIdForState,
       getTabId,
       getStopRequested,
       handleAutoRunLoopUnhandledError,
@@ -127,7 +130,86 @@
       }
     }
 
+    function getStepKeyForState(step, state = {}) {
+      if (typeof getStepDefinitionForState === 'function') {
+        return String(getStepDefinitionForState(step, state)?.key || '').trim();
+      }
+      return '';
+    }
+
+    async function handlePlatformVerifyStepData(payload) {
+      if (payload.localhostUrl) {
+        await closeLocalhostCallbackTabs(payload.localhostUrl);
+      }
+      const latestState = await getState();
+      if (latestState.currentHotmailAccountId && isHotmailProvider(latestState)) {
+        await patchHotmailAccount(latestState.currentHotmailAccountId, {
+          used: true,
+          lastUsedAt: Date.now(),
+        });
+        await addLog('当前 Hotmail 账号已自动标记为已用。', 'ok');
+      }
+      if (String(latestState.mailProvider || '').trim().toLowerCase() === '2925' && latestState.currentMail2925AccountId) {
+        await patchMail2925Account(latestState.currentMail2925AccountId, {
+          lastUsedAt: Date.now(),
+          lastError: '',
+        });
+        await addLog('当前 2925 账号已记录最近使用时间。', 'ok');
+      }
+      if (isLuckmailProvider(latestState)) {
+        const currentPurchase = getCurrentLuckmailPurchase(latestState);
+        if (currentPurchase?.id) {
+          await setLuckmailPurchaseUsedState(currentPurchase.id, true);
+          await addLog(`当前 LuckMail 邮箱 ${currentPurchase.email_address} 已在本地标记为已用。`, 'ok');
+        }
+        await clearLuckmailRuntimeState({ clearEmail: true });
+        await addLog('当前 LuckMail 邮箱运行态已清空，下轮将优先复用未用邮箱或重新购买邮箱。', 'ok');
+      }
+      const localhostPrefix = buildLocalhostCleanupPrefix(payload.localhostUrl);
+      if (localhostPrefix) {
+        await closeTabsByUrlPrefix(localhostPrefix, {
+          excludeUrls: [payload.localhostUrl],
+          excludeLocalhostCallbacks: true,
+        });
+      }
+      await finalizeIcloudAliasAfterSuccessfulFlow(latestState);
+    }
+
     async function handleStepData(step, payload) {
+      const stateForStep = await getState();
+      const stepKey = getStepKeyForState(step, stateForStep);
+
+      if (stepKey === 'oauth-login') {
+        if (payload.loginVerificationRequestedAt) {
+          await setState({ loginVerificationRequestedAt: payload.loginVerificationRequestedAt });
+        }
+        return;
+      }
+
+      if (stepKey === 'fetch-login-code') {
+        await setState({
+          lastEmailTimestamp: payload.emailTimestamp || null,
+          loginVerificationRequestedAt: null,
+        });
+        return;
+      }
+
+      if (stepKey === 'confirm-oauth') {
+        if (payload.localhostUrl) {
+          if (!isLocalhostOAuthCallbackUrl(payload.localhostUrl)) {
+            throw new Error(`步骤 ${step} 返回了无效的 localhost OAuth 回调地址。`);
+          }
+          await setState({ localhostUrl: payload.localhostUrl });
+          broadcastDataUpdate({ localhostUrl: payload.localhostUrl });
+        }
+        return;
+      }
+
+      if (stepKey === 'platform-verify') {
+        await handlePlatformVerifyStepData(payload);
+        return;
+      }
+
       switch (step) {
         case 1: {
           const updates = {};
@@ -181,11 +263,6 @@
             await setState({ loginVerificationRequestedAt: payload.loginVerificationRequestedAt });
           }
           break;
-        case 7:
-          if (payload.loginVerificationRequestedAt) {
-            await setState({ loginVerificationRequestedAt: payload.loginVerificationRequestedAt });
-          }
-          break;
         case 4:
           await setState({
             lastEmailTimestamp: payload.emailTimestamp || null,
@@ -200,59 +277,6 @@
             }
           }
           break;
-        case 8:
-          await setState({
-            lastEmailTimestamp: payload.emailTimestamp || null,
-            loginVerificationRequestedAt: null,
-          });
-          break;
-        case 9:
-          if (payload.localhostUrl) {
-            if (!isLocalhostOAuthCallbackUrl(payload.localhostUrl)) {
-              throw new Error('步骤 9 返回了无效的 localhost OAuth 回调地址。');
-            }
-            await setState({ localhostUrl: payload.localhostUrl });
-            broadcastDataUpdate({ localhostUrl: payload.localhostUrl });
-          }
-          break;
-        case 10: {
-          if (payload.localhostUrl) {
-            await closeLocalhostCallbackTabs(payload.localhostUrl);
-          }
-          const latestState = await getState();
-          if (latestState.currentHotmailAccountId && isHotmailProvider(latestState)) {
-            await patchHotmailAccount(latestState.currentHotmailAccountId, {
-              used: true,
-              lastUsedAt: Date.now(),
-            });
-            await addLog('当前 Hotmail 账号已自动标记为已用。', 'ok');
-          }
-          if (String(latestState.mailProvider || '').trim().toLowerCase() === '2925' && latestState.currentMail2925AccountId) {
-            await patchMail2925Account(latestState.currentMail2925AccountId, {
-              lastUsedAt: Date.now(),
-              lastError: '',
-            });
-            await addLog('当前 2925 账号已记录最近使用时间。', 'ok');
-          }
-          if (isLuckmailProvider(latestState)) {
-            const currentPurchase = getCurrentLuckmailPurchase(latestState);
-            if (currentPurchase?.id) {
-              await setLuckmailPurchaseUsedState(currentPurchase.id, true);
-              await addLog(`当前 LuckMail 邮箱 ${currentPurchase.email_address} 已在本地标记为已用。`, 'ok');
-            }
-            await clearLuckmailRuntimeState({ clearEmail: true });
-            await addLog('当前 LuckMail 邮箱运行态已清空，下轮将优先复用未用邮箱或重新购买邮箱。', 'ok');
-          }
-          const localhostPrefix = buildLocalhostCleanupPrefix(payload.localhostUrl);
-          if (localhostPrefix) {
-            await closeTabsByUrlPrefix(localhostPrefix, {
-              excludeUrls: [payload.localhostUrl],
-              excludeLocalhostCallbacks: true,
-            });
-          }
-          await finalizeIcloudAliasAfterSuccessfulFlow(latestState);
-          break;
-        }
         default:
           break;
       }
@@ -303,11 +327,15 @@
             return { ok: true, error: errorMessage };
           }
 
-          const completionState = message.step === 10 ? await getState() : null;
+          const completionStateCandidate = await getState();
+          const lastStepId = typeof getLastStepIdForState === 'function'
+            ? getLastStepIdForState(completionStateCandidate)
+            : 10;
+          const completionState = message.step === lastStepId ? completionStateCandidate : null;
           await setStepStatus(message.step, 'completed');
           await addLog(`步骤 ${message.step} 已完成`, 'ok');
           await handleStepData(message.step, message.payload);
-          if (message.step === 10 && typeof appendAccountRunRecord === 'function') {
+          if (message.step === lastStepId && typeof appendAccountRunRecord === 'function') {
             await appendAccountRunRecord('success', completionState);
           }
           notifyStepComplete(message.step, message.payload);
@@ -561,13 +589,32 @@
         }
 
         case 'SAVE_SETTING': {
+          const currentState = await getState();
           const updates = buildPersistentSettingsPayload(message.payload || {});
           const sessionUpdates = buildLuckmailSessionSettingsPayload(message.payload || {});
+          const modeChanged = Object.prototype.hasOwnProperty.call(updates, 'plusModeEnabled')
+            && Boolean(currentState?.plusModeEnabled) !== Boolean(updates.plusModeEnabled);
           await setPersistentSettings(updates);
-          await setState({
+          const stateUpdates = {
             ...updates,
             ...sessionUpdates,
-          });
+          };
+          if (modeChanged && typeof getStepIdsForState === 'function') {
+            const nextStateForSteps = { ...currentState, ...stateUpdates };
+            stateUpdates.stepStatuses = Object.fromEntries(
+              getStepIdsForState(nextStateForSteps).map((stepId) => [stepId, 'pending'])
+            );
+            stateUpdates.currentStep = 0;
+          }
+          await setState(stateUpdates);
+          if (modeChanged) {
+            await addLog(
+              Boolean(updates.plusModeEnabled)
+                ? 'Plus 模式已开启，已切换为 Plus Checkout + PayPal 步骤。'
+                : 'Plus 模式已关闭，已恢复普通注册授权步骤。',
+              'info'
+            );
+          }
           return { ok: true, state: await getState() };
         }
 

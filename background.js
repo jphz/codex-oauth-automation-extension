@@ -18,12 +18,17 @@ importScripts(
   'background/logging-status.js',
   'background/steps/registry.js',
   'data/step-definitions.js',
+  'data/address-sources.js',
   'background/steps/open-chatgpt.js',
   'background/steps/submit-signup-email.js',
   'background/steps/fill-password.js',
   'background/steps/fetch-signup-code.js',
   'background/steps/fill-profile.js',
   'background/steps/clear-login-cookies.js',
+  'background/steps/create-plus-checkout.js',
+  'background/steps/fill-plus-checkout.js',
+  'background/steps/paypal-approve.js',
+  'background/steps/plus-return-confirm.js',
   'background/steps/oauth-login.js',
   'background/steps/fetch-login-code.js',
   'background/steps/confirm-oauth.js',
@@ -37,12 +42,28 @@ importScripts(
   'content/activation-utils.js'
 );
 
-const SHARED_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.() || [];
-const STEP_IDS = SHARED_STEP_DEFINITIONS
+const NORMAL_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({ plusModeEnabled: false }) || [];
+const PLUS_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getSteps?.({ plusModeEnabled: true }) || NORMAL_STEP_DEFINITIONS;
+const ALL_STEP_DEFINITIONS = self.MultiPageStepDefinitions?.getAllSteps?.() || [
+  ...NORMAL_STEP_DEFINITIONS,
+  ...PLUS_STEP_DEFINITIONS,
+];
+const STEP_IDS = Array.from(new Set(ALL_STEP_DEFINITIONS
+  .map((definition) => Number(definition?.id))
+  .filter(Number.isFinite)))
+  .sort((left, right) => left - right);
+const NORMAL_STEP_IDS = NORMAL_STEP_DEFINITIONS
   .map((definition) => Number(definition?.id))
   .filter(Number.isFinite)
   .sort((left, right) => left - right);
-const LAST_STEP_ID = STEP_IDS[STEP_IDS.length - 1] || 10;
+const PLUS_STEP_IDS = PLUS_STEP_DEFINITIONS
+  .map((definition) => Number(definition?.id))
+  .filter(Number.isFinite)
+  .sort((left, right) => left - right);
+const LAST_STEP_ID = Math.max(
+  NORMAL_STEP_IDS[NORMAL_STEP_IDS.length - 1] || 10,
+  PLUS_STEP_IDS[PLUS_STEP_IDS.length - 1] || 10
+);
 const FINAL_OAUTH_CHAIN_START_STEP = 7;
 
 const {
@@ -218,6 +239,32 @@ const CONTRIBUTION_RUNTIME_DEFAULTS = self.MultiPageBackgroundContributionOAuth?
 const CONTRIBUTION_RUNTIME_KEYS = self.MultiPageBackgroundContributionOAuth?.RUNTIME_KEYS
   || Object.keys(CONTRIBUTION_RUNTIME_DEFAULTS);
 
+function isPlusModeState(state = {}) {
+  return Boolean(state?.plusModeEnabled);
+}
+
+function getStepDefinitionsForState(state = {}) {
+  return isPlusModeState(state) ? PLUS_STEP_DEFINITIONS : NORMAL_STEP_DEFINITIONS;
+}
+
+function getStepIdsForState(state = {}) {
+  return isPlusModeState(state) ? PLUS_STEP_IDS : NORMAL_STEP_IDS;
+}
+
+function getLastStepIdForState(state = {}) {
+  const ids = getStepIdsForState(state);
+  return ids[ids.length - 1] || 10;
+}
+
+function getAuthChainStartStepId(state = {}) {
+  return isPlusModeState(state) ? 10 : FINAL_OAUTH_CHAIN_START_STEP;
+}
+
+function getStepDefinitionForState(step, state = {}) {
+  const numericStep = Number(step);
+  return getStepDefinitionsForState(state).find((definition) => Number(definition.id) === numericStep) || null;
+}
+
 initializeSessionStorageAccess();
 setupDeclarativeNetRequestRules();
 
@@ -264,6 +311,9 @@ const PERSISTED_SETTING_DEFAULTS = {
   codex2apiUrl: DEFAULT_CODEX2API_URL,
   codex2apiAdminKey: '',
   customPassword: '',
+  plusModeEnabled: false,
+  paypalEmail: '',
+  paypalPassword: '',
   autoRunSkipFailures: false,
   autoRunFallbackThreadIntervalMinutes: 0,
   autoRunDelayEnabled: false,
@@ -350,6 +400,14 @@ const DEFAULT_STATE = {
   sub2apiProxyId: null, // SUB2API 本轮使用的代理 ID。
   codex2apiSessionId: null, // Codex2API OAuth 会话 ID。
   codex2apiOAuthState: null, // Codex2API OAuth state。
+  plusCheckoutTabId: null, // Plus checkout / PayPal 标签页 ID。
+  plusCheckoutUrl: null, // Plus checkout 运行时短链，不写入持久配置。
+  plusCheckoutCountry: 'DE',
+  plusCheckoutCurrency: 'EUR',
+  plusBillingCountryText: '',
+  plusBillingAddress: null,
+  plusPaypalApprovedAt: null,
+  plusReturnUrl: '',
   flowStartTime: null, // 当前流程开始时间。
   tabRegistry: {}, // 程序维护的标签页注册表。
   sourceLastUrls: {}, // 各来源页面最近一次打开的地址记录。
@@ -973,9 +1031,14 @@ function normalizePersistentSettingValue(key, value) {
       return String(value || '').trim();
     case 'customPassword':
       return String(value || '');
+    case 'paypalEmail':
+      return String(value || '').trim();
+    case 'paypalPassword':
+      return String(value || '');
     case 'autoRunSkipFailures':
     case 'autoRunDelayEnabled':
     case 'phoneVerificationEnabled':
+    case 'plusModeEnabled':
       return Boolean(value);
     case 'autoRunFallbackThreadIntervalMinutes':
       return normalizeAutoRunFallbackThreadIntervalMinutes(value);
@@ -1138,7 +1201,7 @@ async function getState() {
     getPersistedAliasState(),
     accountRunHistoryHelpers?.getPersistedAccountRunHistory?.() || [],
   ]);
-  return { ...DEFAULT_STATE, ...persistedSettings, ...persistedAliasState, accountRunHistory, ...state };
+  return { ...DEFAULT_STATE, ...persistedSettings, ...persistedAliasState, ...state, accountRunHistory };
 }
 
 async function initializeSessionStorageAccess() {
@@ -3968,6 +4031,21 @@ async function waitForTabUrlMatch(tabId, matcher, options = {}) {
   return tabRuntime.waitForTabUrlMatch(tabId, matcher, options);
 }
 
+async function waitForTabUrlMatchUntilStopped(tabId, matcher, options = {}) {
+  const retryDelayMs = Math.max(100, Math.floor(Number(options.retryDelayMs) || 300));
+  while (true) {
+    throwIfStopped();
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab) {
+      throw new Error('目标标签页已关闭，无法继续等待页面跳转。');
+    }
+    if (typeof matcher === 'function' && matcher(tab.url || '', tab)) {
+      return tab;
+    }
+    await sleepWithStop(retryDelayMs);
+  }
+}
+
 async function waitForTabComplete(tabId, options = {}) {
   return tabRuntime.waitForTabComplete(tabId, options);
 }
@@ -3976,8 +4054,76 @@ async function waitForTabStableComplete(tabId, options = {}) {
   return tabRuntime.waitForTabStableComplete(tabId, options);
 }
 
+async function waitForTabCompleteUntilStopped(tabId, options = {}) {
+  const retryDelayMs = Math.max(100, Math.floor(Number(options.retryDelayMs) || 300));
+  while (true) {
+    throwIfStopped();
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab) {
+      throw new Error('目标标签页已关闭，无法继续等待页面加载完成。');
+    }
+    if (tab.status === 'complete') {
+      return tab;
+    }
+    await sleepWithStop(retryDelayMs);
+  }
+}
+
 async function ensureContentScriptReadyOnTab(source, tabId, options = {}) {
   return tabRuntime.ensureContentScriptReadyOnTab(source, tabId, options);
+}
+
+async function ensureContentScriptReadyOnTabUntilStopped(source, tabId, options = {}) {
+  const {
+    inject = null,
+    injectSource = null,
+    retryDelayMs = 700,
+    logMessage = '',
+  } = options;
+  let logged = false;
+
+  while (true) {
+    throwIfStopped();
+    const pong = await pingContentScriptOnTab(tabId);
+    if (pong?.ok && (!pong.source || pong.source === source)) {
+      await registerTab(source, tabId);
+      return;
+    }
+
+    if (!inject || !inject.length) {
+      throw new Error(`${getSourceLabel(source)} 内容脚本未就绪，且未提供可用的注入文件。`);
+    }
+
+    try {
+      if (injectSource) {
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          func: (injectedSource) => {
+            window.__MULTIPAGE_SOURCE = injectedSource;
+          },
+          args: [injectSource],
+        });
+      }
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: inject,
+      });
+    } catch (error) {
+      console.warn(LOG_PREFIX, `[ensureContentScriptReadyOnTabUntilStopped] inject failed for ${source}:`, error?.message || error);
+    }
+
+    const pongAfterInject = await pingContentScriptOnTab(tabId);
+    if (pongAfterInject?.ok && (!pongAfterInject.source || pongAfterInject.source === source)) {
+      await registerTab(source, tabId);
+      return;
+    }
+
+    if (logMessage && !logged) {
+      logged = true;
+      await addLog(logMessage, 'warn');
+    }
+    await sleepWithStop(retryDelayMs);
+  }
 }
 
 // ============================================================
@@ -4000,6 +4146,21 @@ function summarizeMessageResultForDebug(result) {
 
 function sendTabMessageWithTimeout(tabId, source, message, responseTimeoutMs = getContentScriptResponseTimeoutMs(message)) {
   return tabRuntime.sendTabMessageWithTimeout(tabId, source, message, responseTimeoutMs);
+}
+
+async function sendTabMessageUntilStopped(tabId, source, message, options = {}) {
+  const retryDelayMs = Math.max(100, Math.floor(Number(options.retryDelayMs) || 300));
+  while (true) {
+    throwIfStopped();
+    try {
+      return await chrome.tabs.sendMessage(tabId, message);
+    } catch (error) {
+      if (!isRetryableContentScriptTransportError(error)) {
+        throw error;
+      }
+      await sleepWithStop(retryDelayMs);
+    }
+  }
 }
 
 function queueCommand(source, message, timeout = 15000) {
@@ -4095,6 +4256,8 @@ function getSourceLabel(source) {
     'hotmail-api': 'Hotmail（API对接/本地助手）',
     'luckmail-api': 'LuckMail（API 购邮）',
     'cloudflare-temp-email': 'Cloudflare Temp Email',
+    'plus-checkout': 'Plus Checkout',
+    'paypal-flow': 'PayPal 授权页',
   };
   return labels[source] || source || '未知来源';
 }
@@ -4300,26 +4463,45 @@ function isStepDoneStatus(status) {
   return status === 'completed' || status === 'manual_completed' || status === 'skipped';
 }
 
-function getFirstUnfinishedStep(statuses = {}) {
-  if (typeof loggingStatus !== 'undefined' && loggingStatus?.getFirstUnfinishedStep) {
-    return loggingStatus.getFirstUnfinishedStep(statuses);
-  }
-  for (const step of STEP_IDS) {
+function getFirstUnfinishedStep(statuses = {}, stateOverride = null) {
+  const state = stateOverride || {};
+  const activeStepIds = typeof getStepIdsForState === 'function'
+    ? getStepIdsForState(state)
+    : (typeof STEP_IDS !== 'undefined' && Array.isArray(STEP_IDS) && STEP_IDS.length
+      ? STEP_IDS
+      : Array.from({ length: typeof LAST_STEP_ID === 'number' ? LAST_STEP_ID : 10 }, (_, index) => index + 1));
+  for (const step of activeStepIds) {
     if (!isStepDoneStatus(statuses[step] || 'pending')) return step;
   }
   return null;
 }
 
-function hasSavedProgress(statuses = {}) {
-  if (typeof loggingStatus !== 'undefined' && loggingStatus?.hasSavedProgress) {
-    return loggingStatus.hasSavedProgress(statuses);
-  }
-  return Object.values({ ...DEFAULT_STATE.stepStatuses, ...statuses }).some((status) => status !== 'pending');
+function hasSavedProgress(statuses = {}, stateOverride = null) {
+  const state = stateOverride || {};
+  const merged = { ...DEFAULT_STATE.stepStatuses, ...statuses };
+  const activeStepIds = typeof getStepIdsForState === 'function'
+    ? getStepIdsForState(state)
+    : (typeof STEP_IDS !== 'undefined' && Array.isArray(STEP_IDS) && STEP_IDS.length
+      ? STEP_IDS
+      : Array.from({ length: typeof LAST_STEP_ID === 'number' ? LAST_STEP_ID : 10 }, (_, index) => index + 1));
+  return activeStepIds.some((step) => (merged[step] || 'pending') !== 'pending');
 }
 
 function getDownstreamStateResets(step) {
+  const plusRuntimeResets = {
+    plusCheckoutTabId: null,
+    plusCheckoutUrl: null,
+    plusCheckoutCountry: 'DE',
+    plusCheckoutCurrency: 'EUR',
+    plusBillingCountryText: '',
+    plusBillingAddress: null,
+    plusPaypalApprovedAt: null,
+    plusReturnUrl: '',
+  };
+
   if (step <= 1) {
     return {
+      ...plusRuntimeResets,
       oauthUrl: null,
       sub2apiSessionId: null,
       sub2apiOAuthState: null,
@@ -4341,6 +4523,7 @@ function getDownstreamStateResets(step) {
   }
   if (step === 2) {
     return {
+      ...plusRuntimeResets,
       password: null,
       lastEmailTimestamp: null,
       signupVerificationRequestedAt: null,
@@ -4354,6 +4537,7 @@ function getDownstreamStateResets(step) {
   }
   if (step === 3 || step === 4) {
     return {
+      ...plusRuntimeResets,
       lastEmailTimestamp: null,
       signupVerificationRequestedAt: null,
       loginVerificationRequestedAt: null,
@@ -4366,6 +4550,17 @@ function getDownstreamStateResets(step) {
   }
   if (step === 5 || step === 6 || step === 7 || step === 8) {
     return {
+      ...(step <= 6 ? plusRuntimeResets : {}),
+      ...(step === 7 ? {
+        plusBillingCountryText: '',
+        plusBillingAddress: null,
+        plusPaypalApprovedAt: null,
+        plusReturnUrl: '',
+      } : {}),
+      ...(step === 8 ? {
+        plusPaypalApprovedAt: null,
+        plusReturnUrl: '',
+      } : {}),
       lastLoginCode: null,
       loginVerificationRequestedAt: null,
       oauthFlowDeadlineAt: null,
@@ -4375,6 +4570,7 @@ function getDownstreamStateResets(step) {
   }
   if (step === 9) {
     return {
+      plusReturnUrl: '',
       localhostUrl: null,
     };
   }
@@ -4387,7 +4583,15 @@ async function invalidateDownstreamAfterStepRestart(step, options = {}) {
   const statuses = { ...(state.stepStatuses || {}) };
   const changedSteps = [];
 
-  for (let downstream = step + 1; downstream <= LAST_STEP_ID; downstream++) {
+  const activeStepIds = typeof getStepIdsForState === 'function'
+    ? getStepIdsForState(state)
+    : (typeof STEP_IDS !== 'undefined' && Array.isArray(STEP_IDS) && STEP_IDS.length
+      ? STEP_IDS
+      : Array.from({ length: typeof LAST_STEP_ID === 'number' ? LAST_STEP_ID : 10 }, (_, index) => index + 1));
+  for (const downstream of activeStepIds) {
+    if (downstream <= step) {
+      continue;
+    }
     if (statuses[downstream] !== 'pending') {
       statuses[downstream] = 'pending';
       changedSteps.push(downstream);
@@ -4416,22 +4620,26 @@ function clearStopRequest() {
   stopRequested = false;
 }
 
-function getRunningSteps(statuses = {}) {
-  if (typeof loggingStatus !== 'undefined' && loggingStatus?.getRunningSteps) {
-    return loggingStatus.getRunningSteps(statuses);
-  }
-  return Object.entries({ ...DEFAULT_STATE.stepStatuses, ...statuses })
-    .filter(([, status]) => status === 'running')
-    .map(([step]) => Number(step))
+function getRunningSteps(statuses = {}, stateOverride = null) {
+  const state = stateOverride || {};
+  const merged = { ...DEFAULT_STATE.stepStatuses, ...statuses };
+  const activeStepIds = typeof getStepIdsForState === 'function'
+    ? getStepIdsForState(state)
+    : (typeof STEP_IDS !== 'undefined' && Array.isArray(STEP_IDS) && STEP_IDS.length
+      ? STEP_IDS
+      : Array.from({ length: typeof LAST_STEP_ID === 'number' ? LAST_STEP_ID : 10 }, (_, index) => index + 1));
+  return activeStepIds
+    .filter((step) => merged[step] === 'running')
     .sort((a, b) => a - b);
 }
 
 function inferStoppedRecordStep(state = {}) {
   const statuses = { ...DEFAULT_STATE.stepStatuses, ...(state?.stepStatuses || {}) };
-  const stepIds = Object.keys(statuses)
-    .map((step) => Number(step))
-    .filter(Number.isFinite)
-    .sort((left, right) => left - right);
+  const stepIds = typeof getStepIdsForState === 'function'
+    ? getStepIdsForState(state)
+    : (typeof STEP_IDS !== 'undefined' && Array.isArray(STEP_IDS) && STEP_IDS.length
+      ? STEP_IDS
+      : Array.from({ length: typeof LAST_STEP_ID === 'number' ? LAST_STEP_ID : 10 }, (_, index) => index + 1));
 
   const runningSteps = stepIds.filter((step) => statuses[step] === 'running');
   if (runningSteps.length) {
@@ -4932,8 +5140,13 @@ async function ensureManualInteractionAllowed(actionLabel) {
 
 async function skipStep(step) {
   const state = await ensureManualInteractionAllowed('跳过步骤');
+  const activeStepIds = typeof getStepIdsForState === 'function'
+    ? getStepIdsForState(state)
+    : (typeof STEP_IDS !== 'undefined' && Array.isArray(STEP_IDS) && STEP_IDS.length
+      ? STEP_IDS
+      : Array.from({ length: typeof LAST_STEP_ID === 'number' ? LAST_STEP_ID : 10 }, (_, index) => index + 1));
 
-  if (!Number.isInteger(step) || !STEP_IDS.includes(step)) {
+  if (!Number.isInteger(step) || !activeStepIds.includes(step)) {
     throw new Error(`无效步骤：${step}`);
   }
 
@@ -4946,10 +5159,12 @@ async function skipStep(step) {
     throw new Error(`步骤 ${step} 已完成，无需再跳过。`);
   }
 
-  if (step > 1) {
-    const prevStatus = statuses[step - 1];
+  const currentIndex = activeStepIds.indexOf(step);
+  if (currentIndex > 0) {
+    const prevStep = activeStepIds[currentIndex - 1];
+    const prevStatus = statuses[prevStep];
     if (!isStepDoneStatus(prevStatus)) {
-      throw new Error(`请先完成步骤 ${step - 1}，再跳过步骤 ${step}。`);
+      throw new Error(`请先完成步骤 ${prevStep}，再跳过步骤 ${step}。`);
     }
   }
 
@@ -5220,7 +5435,7 @@ const stepWaiters = new Map();
 let resumeWaiter = null;
 const AUTO_RUN_SIGNAL_COMPLETION_TIMEOUT_MS = 120000;
 const AUTO_RUN_BACKGROUND_COMPLETED_STEPS = new Set([1, 2, 4, 6, 7, 8, 9]);
-const STEP_COMPLETION_SIGNAL_STEPS = new Set([3, 5, 10]);
+const STEP_COMPLETION_SIGNAL_STEPS = new Set([3, 5, 10, 12]);
 
 function waitForStepComplete(step, timeoutMs = 120000) {
   return new Promise((resolve, reject) => {
@@ -5266,11 +5481,15 @@ async function completeStepFromBackground(step, payload = {}) {
     return;
   }
 
-  const completionState = step === LAST_STEP_ID ? await getState() : null;
+  const latestState = await getState();
+  const lastStepId = typeof getLastStepIdForState === 'function'
+    ? getLastStepIdForState(latestState)
+    : (typeof LAST_STEP_ID === 'number' ? LAST_STEP_ID : 10);
+  const completionState = step === lastStepId ? latestState : null;
   await setStepStatus(step, 'completed');
   await addLog(`步骤 ${step} 已完成`, 'ok');
   await handleStepData(step, payload);
-  if (step === LAST_STEP_ID) {
+  if (step === lastStepId) {
     await appendAndBroadcastAccountRunRecord('success', completionState);
   }
   notifyStepComplete(step, payload);
@@ -5349,7 +5568,7 @@ async function executeStepViaCompletionSignal(step, timeoutMs = AUTO_RUN_SIGNAL_
 
 async function waitForRunningStepsToFinish(payload = {}) {
   let currentState = await getState();
-  let runningSteps = getRunningSteps(currentState.stepStatuses);
+  let runningSteps = getRunningSteps(currentState.stepStatuses, currentState);
   if (!runningSteps.length) {
     return currentState;
   }
@@ -5360,14 +5579,14 @@ async function waitForRunningStepsToFinish(payload = {}) {
   while (runningSteps.length) {
     await sleepWithStop(250);
     currentState = await getState();
-    runningSteps = getRunningSteps(currentState.stepStatuses);
+    runningSteps = getRunningSteps(currentState.stepStatuses, currentState);
   }
 
   await addLog('自动继续：当前运行步骤已结束，准备按最新进度继续自动流程...', 'info');
   return currentState;
 }
 
-const AUTH_CHAIN_STEP_IDS = new Set([7, 8, 9, 10]);
+const AUTH_CHAIN_STEP_IDS = new Set([7, 8, 9, 10, 11, 12]);
 let activeTopLevelAuthChainExecution = null;
 
 function isAuthChainStep(step) {
@@ -5422,7 +5641,7 @@ async function acquireTopLevelAuthChainExecution(step) {
 
 async function markRunningStepsStopped() {
   const state = await getState();
-  const runningSteps = getRunningSteps(state.stepStatuses);
+  const runningSteps = getRunningSteps(state.stepStatuses, state);
 
   for (const step of runningSteps) {
     await setStepStatus(step, 'stopped');
@@ -5432,7 +5651,7 @@ async function markRunningStepsStopped() {
 async function requestStop(options = {}) {
   const { logMessage = '已收到停止请求，正在取消当前操作...' } = options;
   const state = await getState();
-  const runningSteps = getRunningSteps(state.stepStatuses);
+  const runningSteps = getRunningSteps(state.stepStatuses, state);
   const inferredStopStep = inferStoppedRecordStep(state);
   const timerPlan = getPendingAutoRunTimerPlan(state);
 
@@ -5535,7 +5754,15 @@ async function executeStep(step, options = {}) {
       await setState({ flowStartTime: Date.now() });
     }
 
-    await stepRegistry.executeStep(step, state);
+    const activeStepRegistry = getStepRegistryForState(state);
+    if (!activeStepRegistry?.getStepDefinition?.(step)) {
+      throw new Error(`当前模式下不存在步骤：${step}`);
+    }
+    await activeStepRegistry.executeStep(step, {
+      ...state,
+      visibleStep: Number(step),
+      stepDefinition: getStepDefinitionForState(step, state),
+    });
   } catch (err) {
     executionError = err;
     const state = await getState();
@@ -6272,8 +6499,14 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
 
   let restartFromStep1WithCurrentEmail = false;
   let step = Math.max(currentStartStep, 4);
-  while (step <= LAST_STEP_ID) {
+  while (step <= (typeof getLastStepIdForState === 'function'
+    ? getLastStepIdForState(await getState())
+    : (typeof LAST_STEP_ID === 'number' ? LAST_STEP_ID : 10))) {
     const latestState = await getState();
+    if (typeof getStepDefinitionForState === 'function' && !getStepDefinitionForState(step, latestState)) {
+      step += 1;
+      continue;
+    }
     const currentStatus = latestState.stepStatuses?.[step] || 'pending';
     if (isStepDoneStatus(currentStatus)) {
       await addLog(`自动运行：步骤 ${step} 当前状态为 ${currentStatus}，将直接继续后续流程。`, 'info');
@@ -6323,6 +6556,11 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
       const restartDecision = await getPostStep6AutoRestartDecision(step, err);
       if (restartDecision.shouldRestart) {
         postStep7RestartCount += 1;
+        const restartStep = restartDecision.restartStep
+          || (typeof getAuthChainStartStepId === 'function'
+            ? getAuthChainStartStepId(await getState())
+            : FINAL_OAUTH_CHAIN_START_STEP);
+        const resetAfterStep = Math.max(1, restartStep - 1);
         const authState = restartDecision.authState;
         const authStateLabel = authState?.state ? getLoginAuthStateLabel(authState.state) : '未知页面';
         const authStateSuffix = authState?.url
@@ -6331,13 +6569,13 @@ async function runAutoSequenceFromStep(startStep, context = {}) {
             ? `当前认证页：${authStateLabel}`
             : '未获取到认证页状态';
         await addLog(
-          `步骤 ${step}：检测到报错且当前未进入 add-phone，正在回到步骤 7 重新开始授权流程（第 ${postStep7RestartCount} 次重开）。${authStateSuffix}；原因：${restartDecision.errorMessage || '未知错误'}`,
+          `步骤 ${step}：检测到报错且当前未进入 add-phone，正在回到步骤 ${restartStep} 重新开始授权流程（第 ${postStep7RestartCount} 次重开）。${authStateSuffix}；原因：${restartDecision.errorMessage || '未知错误'}`,
           'warn'
         );
-        await invalidateDownstreamAfterStepRestart(6, {
-          logLabel: `步骤 ${step} 报错后准备回到步骤 7 重试（第 ${postStep7RestartCount} 次重开）`,
+        await invalidateDownstreamAfterStepRestart(resetAfterStep, {
+          logLabel: `步骤 ${step} 报错后准备回到步骤 ${restartStep} 重试（第 ${postStep7RestartCount} 次重开）`,
         });
-        step = 7;
+        step = restartStep;
         continue;
       }
 
@@ -6670,6 +6908,55 @@ const step8Executor = self.MultiPageBackgroundStep8?.createStep8Executor({
   STEP7_MAIL_POLLING_RECOVERY_MAX_ATTEMPTS,
   throwIfStopped,
 });
+const plusCheckoutCreateExecutor = self.MultiPageBackgroundPlusCheckoutCreate?.createPlusCheckoutCreateExecutor({
+  addLog,
+  chrome,
+  completeStepFromBackground,
+  ensureContentScriptReadyOnTabUntilStopped,
+  reuseOrCreateTab,
+  sendTabMessageUntilStopped,
+  setState,
+  sleepWithStop,
+  waitForTabCompleteUntilStopped,
+});
+const plusCheckoutBillingExecutor = self.MultiPageBackgroundPlusCheckoutBilling?.createPlusCheckoutBillingExecutor({
+  addLog,
+  chrome,
+  completeStepFromBackground,
+  ensureContentScriptReadyOnTabUntilStopped,
+  generateRandomName,
+  getAddressSeedForCountry: self.MultiPageAddressSources?.getAddressSeedForCountry,
+  getTabId,
+  isTabAlive,
+  sendTabMessageUntilStopped,
+  setState,
+  sleepWithStop,
+  waitForTabCompleteUntilStopped,
+  waitForTabUrlMatchUntilStopped,
+});
+const payPalApproveExecutor = self.MultiPageBackgroundPayPalApprove?.createPayPalApproveExecutor({
+  addLog,
+  chrome,
+  completeStepFromBackground,
+  ensureContentScriptReadyOnTabUntilStopped,
+  getTabId,
+  isTabAlive,
+  sendTabMessageUntilStopped,
+  setState,
+  sleepWithStop,
+  waitForTabCompleteUntilStopped,
+  waitForTabUrlMatchUntilStopped,
+});
+const plusReturnConfirmExecutor = self.MultiPageBackgroundPlusReturnConfirm?.createPlusReturnConfirmExecutor({
+  addLog,
+  completeStepFromBackground,
+  getTabId,
+  isTabAlive,
+  setState,
+  sleepWithStop,
+  waitForTabCompleteUntilStopped,
+  waitForTabUrlMatchUntilStopped,
+});
 const step10Executor = self.MultiPageBackgroundStep10?.createStep10Executor({
   addLog,
   chrome,
@@ -6689,7 +6976,6 @@ const step10Executor = self.MultiPageBackgroundStep10?.createStep10Executor({
   shouldBypassStep9ForLocalCpa,
   SUB2API_STEP9_RESPONSE_TIMEOUT_MS,
 });
-const stepDefinitions = SHARED_STEP_DEFINITIONS;
 const stepExecutorsByKey = {
   'open-chatgpt': () => step1Executor.executeStep1(),
   'submit-signup-email': (state) => step2Executor.executeStep2(state),
@@ -6697,6 +6983,10 @@ const stepExecutorsByKey = {
   'fetch-signup-code': (state) => step4Executor.executeStep4(state),
   'fill-profile': (state) => step5Executor.executeStep5(state),
   'clear-login-cookies': () => step6Executor.executeStep6(),
+  'plus-checkout-create': (state) => plusCheckoutCreateExecutor.executePlusCheckoutCreate(state),
+  'plus-checkout-billing': (state) => plusCheckoutBillingExecutor.executePlusCheckoutBilling(state),
+  'paypal-approve': (state) => payPalApproveExecutor.executePayPalApprove(state),
+  'plus-checkout-return': (state) => plusReturnConfirmExecutor.executePlusReturnConfirm(state),
   'oauth-login': (state) => step7Executor.executeStep7(state),
   'fetch-login-code': (state) => step8Executor.executeStep8(state),
   'confirm-oauth': (state) => step9Executor.executeStep9(state),
@@ -6747,6 +7037,9 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   getPendingAutoRunTimerPlan,
   getSourceLabel,
   getState,
+  getStepDefinitionForState,
+  getStepIdsForState,
+  getLastStepIdForState,
   getTabId,
   getStopRequested: () => stopRequested,
   handleCloudflareSecurityBlocked,
@@ -6804,12 +7097,22 @@ const messageRouter = self.MultiPageBackgroundMessageRouter?.createMessageRouter
   upsertHotmailAccount,
   verifyHotmailAccount,
 });
-const stepRegistry = self.MultiPageBackgroundStepRegistry?.createStepRegistry(
-  stepDefinitions.map((definition) => ({
-    ...definition,
-    execute: stepExecutorsByKey[definition.key],
-  }))
-);
+
+function buildStepRegistry(definitions = []) {
+  return self.MultiPageBackgroundStepRegistry?.createStepRegistry(
+    definitions.map((definition) => ({
+      ...definition,
+      execute: stepExecutorsByKey[definition.key],
+    }))
+  );
+}
+
+const normalStepRegistry = buildStepRegistry(NORMAL_STEP_DEFINITIONS);
+const plusStepRegistry = buildStepRegistry(PLUS_STEP_DEFINITIONS);
+
+function getStepRegistryForState(state = {}) {
+  return isPlusModeState(state) ? plusStepRegistry : normalStepRegistry;
+}
 
 async function requestOAuthUrlFromPanel(state, options = {}) {
   return panelBridge.requestOAuthUrlFromPanel(state, options);
@@ -7268,11 +7571,19 @@ async function getPostStep6AutoRestartDecision(step, error) {
   const normalizedStep = Number(step);
   const errorMessage = getErrorMessage(error);
   const shouldForceRestartFromStep7 = /restart step 7 with a new number/i.test(errorMessage);
-  if (!Number.isFinite(normalizedStep) || normalizedStep < 7 || normalizedStep > LAST_STEP_ID) {
+  const latestState = await getState();
+  const authChainStartStep = typeof getAuthChainStartStepId === 'function'
+    ? getAuthChainStartStepId(latestState)
+    : FINAL_OAUTH_CHAIN_START_STEP;
+  const lastStepId = typeof getLastStepIdForState === 'function'
+    ? getLastStepIdForState(latestState)
+    : (typeof LAST_STEP_ID === 'number' ? LAST_STEP_ID : 10);
+  if (!Number.isFinite(normalizedStep) || normalizedStep < authChainStartStep || normalizedStep > lastStepId) {
     return {
       shouldRestart: false,
       blockedByAddPhone: false,
       forcedByPhoneVerificationTimeout: false,
+      restartStep: authChainStartStep,
       errorMessage,
       authState: null,
     };
@@ -7283,6 +7594,7 @@ async function getPostStep6AutoRestartDecision(step, error) {
       shouldRestart: true,
       blockedByAddPhone: false,
       forcedByPhoneVerificationTimeout: true,
+      restartStep: authChainStartStep,
       errorMessage,
       authState: null,
     };
@@ -7293,6 +7605,7 @@ async function getPostStep6AutoRestartDecision(step, error) {
       shouldRestart: false,
       blockedByAddPhone: true,
       forcedByPhoneVerificationTimeout: false,
+      restartStep: authChainStartStep,
       errorMessage,
       authState: null,
     };
@@ -7316,6 +7629,7 @@ async function getPostStep6AutoRestartDecision(step, error) {
       shouldRestart: false,
       blockedByAddPhone: true,
       forcedByPhoneVerificationTimeout: false,
+      restartStep: authChainStartStep,
       errorMessage,
       authState,
     };
@@ -7325,6 +7639,7 @@ async function getPostStep6AutoRestartDecision(step, error) {
     shouldRestart: true,
     blockedByAddPhone: false,
     forcedByPhoneVerificationTimeout: false,
+    restartStep: authChainStartStep,
     errorMessage,
     authState,
   };

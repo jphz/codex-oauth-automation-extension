@@ -212,6 +212,28 @@
           <button id="btn-toggle-password" class="input-icon-btn" type="button" aria-label="显示密码" title="显示密码"></button>
         </div>
       </div>
+      <div class="data-row" id="row-plus-mode">
+        <span class="data-label">Plus 模式</span>
+        <div class="data-inline setting-pair">
+          <div class="setting-group setting-group-primary">
+            <label class="toggle-switch" for="input-plus-mode-enabled" title="开启后使用 Plus Checkout + PayPal 授权流程">
+              <input type="checkbox" id="input-plus-mode-enabled" />
+              <span class="toggle-switch-track" aria-hidden="true">
+                <span class="toggle-switch-thumb"></span>
+              </span>
+            </label>
+          </div>
+          <span class="setting-caption">PayPal 订阅链路</span>
+        </div>
+      </div>
+      <div class="data-row" id="row-paypal-email" style="display:none;">
+        <span class="data-label">PayPal 账号</span>
+        <input type="text" id="input-paypal-email" class="data-input" placeholder="请输入 PayPal 登录邮箱" />
+      </div>
+      <div class="data-row" id="row-paypal-password" style="display:none;">
+        <span class="data-label">PayPal 密码</span>
+        <input type="password" id="input-paypal-password" class="data-input" placeholder="请输入 PayPal 登录密码" />
+      </div>
       <div class="data-row">
         <span class="data-label">邮箱服务</span>
         <div class="data-inline">

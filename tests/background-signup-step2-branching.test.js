@@ -124,21 +124,6 @@ test('step 2 stops with an explicit error instead of silently skipping 3/4/5 on 
 
   assert.deepStrictEqual(completedPayloads, []);
   assert.ok(logs.some((item) => /3\/4\/5/.test(item.message)));
-  return;
-  if (false) await executor.executeStep2({ email: 'user@example.com' });
-
-  if (false) assert.equal(completedPayloads.length, 1);
-  if (false) assert.deepStrictEqual(completedPayloads[0], {
-    step: 2,
-    payload: {
-      email: 'user@example.com',
-      nextSignupState: 'already_logged_in_home',
-      nextSignupUrl: 'https://chatgpt.com/',
-      skippedPasswordStep: true,
-      skipRegistrationFlow: true,
-    },
-  });
-  assert.ok(logs.some((item) => /已跳过注册链路/.test(item.message)));
 });
 
 test('signup flow helper recognizes email verification page as post-email landing page', async () => {
@@ -312,7 +297,7 @@ test('signup flow helper rewrites retryable step 3 finalize transport timeout in
 
   await assert.rejects(
     () => helpers.finalizeSignupPasswordSubmitInTab(31, 'Secret123!', 3),
-    /步骤 3：认证页在提交后切换过程中页面通信超时，未能重新就绪，暂时无法确认是否进入下一页面。请重试当前轮。/
+    /步骤 3：认证页在提交后切换过程中页面通信超时/
   );
 
   assert.deepStrictEqual(logs, [

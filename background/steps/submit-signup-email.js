@@ -23,7 +23,7 @@
 
     function isSignupEntryUnavailableErrorMessage(errorLike) {
       const message = getErrorMessage(errorLike);
-      return /未找到可用的邮箱输入入口|当前页面没有可用的注册入口，也不在邮箱\/密码页/.test(message);
+      return /未找到可用的邮箱输入入口|当前页面没有可用的注册入口，也不在邮箱\/密码页/i.test(message);
     }
 
     function isRetryableStep2TransportErrorMessage(errorLike) {
@@ -36,16 +36,19 @@
       if (!url) {
         return false;
       }
+
       try {
         const parsed = new URL(url);
         const host = String(parsed.hostname || '').toLowerCase();
         if (!['chatgpt.com', 'www.chatgpt.com'].includes(host)) {
           return false;
         }
+
         const path = String(parsed.pathname || '');
         if (/^\/(?:auth\/|create-account\/|email-verification|log-in|add-phone)(?:[/?#]|$)/i.test(path)) {
           return false;
         }
+
         return true;
       } catch {
         return false;
@@ -56,10 +59,10 @@
       if (!Number.isInteger(tabId) || typeof chrome?.tabs?.get !== 'function') {
         return false;
       }
+
       try {
         const tab = await chrome.tabs.get(tabId);
-        const currentUrl = String(tab?.url || '');
-        return isLikelyLoggedInChatgptHomeUrl(currentUrl);
+        return isLikelyLoggedInChatgptHomeUrl(tab?.url);
       } catch {
         return false;
       }
@@ -69,33 +72,13 @@
       if (!Number.isInteger(tabId) || typeof chrome?.tabs?.get !== 'function') {
         return '';
       }
+
       try {
         const tab = await chrome.tabs.get(tabId);
         return String(tab?.url || '');
       } catch {
         return '';
       }
-    }
-
-    async function completeStep2AsLoggedInSession(tabId, resolvedEmail, reasonMessage = '') {
-      const currentUrl = await getTabUrl(tabId);
-      if (!isLikelyLoggedInChatgptHomeUrl(currentUrl)) {
-        return false;
-      }
-      const reasonText = getErrorMessage(reasonMessage);
-      const reasonSuffix = reasonText ? `（触发原因：${reasonText}）` : '';
-      await addLog(`步骤 2：检测到当前会话已登录 ChatGPT，已跳过注册链路（步骤 3/4/5），将直接进入步骤 6。${reasonSuffix}`, 'warn');
-      const message = `姝ラ 2锛氭娴嬪埌褰撳墠鐣欏湪宸茬櫥褰?ChatGPT 棣栭〉锛屽凡闃绘鑷姩璺宠繃姝ラ 3/4/5銆傝鍏堟墽琛屾楠?1 娓呯悊浼氳瘽鍚庨噸璇曘€?${reasonSuffix}`;
-      await addLog(message, 'error');
-      throw new Error(message);
-      await completeStepFromBackground(2, {
-        email: resolvedEmail,
-        nextSignupState: 'already_logged_in_home',
-        nextSignupUrl: currentUrl || 'https://chatgpt.com/',
-        skippedPasswordStep: true,
-        skipRegistrationFlow: true,
-      });
-      return true;
     }
 
     async function failStep2OnLoggedInSession(tabId, reasonMessage = '') {

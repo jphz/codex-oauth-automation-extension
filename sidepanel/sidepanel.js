@@ -223,6 +223,9 @@ const inputAutoDelayMinutes = document.getElementById('input-auto-delay-minutes'
 const inputAutoStepDelaySeconds = document.getElementById('input-auto-step-delay-seconds');
 const inputVerificationResendCount = document.getElementById('input-verification-resend-count');
 const rowAccountRunHistoryTextEnabled = document.getElementById('row-account-run-history-text-enabled');
+const inputHeroSmsApiKey = document.getElementById('input-hero-sms-api-key');
+const selectHeroSmsCountry = document.getElementById('select-hero-sms-country');
+const displayHeroSmsPlatform = document.getElementById('display-hero-sms-platform');
 const inputAccountRunHistoryTextEnabled = document.getElementById('input-account-run-history-text-enabled');
 const rowAccountRunHistoryHelperBaseUrl = document.getElementById('row-account-run-history-helper-base-url');
 const inputAccountRunHistoryHelperBaseUrl = document.getElementById('input-account-run-history-helper-base-url');
@@ -276,6 +279,9 @@ const DEFAULT_LUCKMAIL_BASE_URL = 'https://mails.luckyous.com';
 const DEFAULT_LUCKMAIL_EMAIL_TYPE = 'ms_graph';
 const DISPLAY_TIMEZONE = 'Asia/Shanghai';
 const DEFAULT_ACCOUNT_RUN_HISTORY_HELPER_BASE_URL = 'http://127.0.0.1:17373';
+const CONTRIBUTION_UPLOAD_URL = 'https://apikey.qzz.io/';
+const DEFAULT_HERO_SMS_COUNTRY_ID = 52;
+const DEFAULT_HERO_SMS_COUNTRY_LABEL = 'Thailand';
 
 function getManagedAliasUtils() {
   return window.MultiPageManagedAliasUtils || null;
@@ -1654,6 +1660,15 @@ function collectSettingsPayload() {
   const mail2925UseAccountPool = typeof inputMail2925UseAccountPool !== 'undefined'
     ? Boolean(inputMail2925UseAccountPool?.checked)
     : Boolean(latestState?.mail2925UseAccountPool);
+  const heroSmsApiKeyValue = typeof inputHeroSmsApiKey !== 'undefined' && inputHeroSmsApiKey
+    ? (inputHeroSmsApiKey.value || '')
+    : '';
+  const heroSmsCountry = typeof getSelectedHeroSmsCountryOption === 'function'
+    ? getSelectedHeroSmsCountryOption()
+    : {
+      id: typeof DEFAULT_HERO_SMS_COUNTRY_ID !== 'undefined' ? DEFAULT_HERO_SMS_COUNTRY_ID : 52,
+      label: typeof DEFAULT_HERO_SMS_COUNTRY_LABEL !== 'undefined' ? DEFAULT_HERO_SMS_COUNTRY_LABEL : 'Thailand',
+    };
   return {
     panelMode: selectPanelMode.value,
     vpsUrl: inputVpsUrl.value.trim(),
@@ -1717,6 +1732,9 @@ function collectSettingsPayload() {
       inputVerificationResendCount?.value,
       DEFAULT_VERIFICATION_RESEND_COUNT
     ),
+    heroSmsApiKey: heroSmsApiKeyValue,
+    heroSmsCountryId: heroSmsCountry.id,
+    heroSmsCountryLabel: heroSmsCountry.label,
   };
 }
 
@@ -1763,6 +1781,75 @@ function normalizeAccountRunHistoryHelperBaseUrlValue(value = '') {
   } catch {
     return DEFAULT_ACCOUNT_RUN_HISTORY_HELPER_BASE_URL;
   }
+}
+
+function normalizeHeroSmsCountryId(value) {
+  return Math.max(1, Math.floor(Number(value) || DEFAULT_HERO_SMS_COUNTRY_ID));
+}
+
+function normalizeHeroSmsCountryLabel(value = '') {
+  return String(value || '').trim() || DEFAULT_HERO_SMS_COUNTRY_LABEL;
+}
+
+function getSelectedHeroSmsCountryOption() {
+  if (!selectHeroSmsCountry) {
+    return {
+      id: DEFAULT_HERO_SMS_COUNTRY_ID,
+      label: DEFAULT_HERO_SMS_COUNTRY_LABEL,
+    };
+  }
+
+  const option = selectHeroSmsCountry.options[selectHeroSmsCountry.selectedIndex];
+  return {
+    id: normalizeHeroSmsCountryId(selectHeroSmsCountry.value),
+    label: normalizeHeroSmsCountryLabel(option?.textContent),
+  };
+}
+
+function updateHeroSmsPlatformDisplay(label = '') {
+  if (!displayHeroSmsPlatform) {
+    return;
+  }
+  const countryLabel = normalizeHeroSmsCountryLabel(label);
+  displayHeroSmsPlatform.textContent = `HeroSMS / OpenAI / ${countryLabel}`;
+}
+
+async function loadHeroSmsCountries() {
+  if (!selectHeroSmsCountry) {
+    return;
+  }
+
+  const previousValue = selectHeroSmsCountry.value || String(DEFAULT_HERO_SMS_COUNTRY_ID);
+  try {
+    const response = await fetch('https://hero-sms.com/stubs/handler_api.php?action=getCountries');
+    const payload = await response.json();
+    const countries = Array.isArray(payload?.value) ? payload.value : (Array.isArray(payload) ? payload : []);
+    if (!countries.length) {
+      throw new Error('empty country list');
+    }
+
+    const optionsHtml = countries
+      .filter((item) => Number(item?.id) > 0 && String(item?.eng || '').trim())
+      .sort((left, right) => String(left.eng || '').localeCompare(String(right.eng || '')))
+      .map((item) => {
+        const id = normalizeHeroSmsCountryId(item.id);
+        const label = String(item.eng || '').trim();
+        return `<option value="${id}">${label}</option>`;
+      })
+      .join('');
+
+    if (optionsHtml) {
+      selectHeroSmsCountry.innerHTML = optionsHtml;
+    }
+  } catch (error) {
+    console.warn('Failed to load HeroSMS countries:', error);
+    selectHeroSmsCountry.innerHTML = `<option value="${DEFAULT_HERO_SMS_COUNTRY_ID}">${DEFAULT_HERO_SMS_COUNTRY_LABEL}</option>`;
+  }
+
+  selectHeroSmsCountry.value = Array.from(selectHeroSmsCountry.options).some((option) => option.value === previousValue)
+    ? previousValue
+    : String(DEFAULT_HERO_SMS_COUNTRY_ID);
+  updateHeroSmsPlatformDisplay(getSelectedHeroSmsCountryOption().label);
 }
 
 function getSelectedLocalCpaStep9Mode() {
@@ -2149,6 +2236,16 @@ function applySettingsState(state) {
     inputVerificationResendCount.value = String(
       normalizeVerificationResendCount(restoredVerificationResendCount, DEFAULT_VERIFICATION_RESEND_COUNT)
     );
+  }
+  if (inputHeroSmsApiKey) {
+    inputHeroSmsApiKey.value = state?.heroSmsApiKey || '';
+  }
+  if (selectHeroSmsCountry) {
+    const restoredCountryId = String(normalizeHeroSmsCountryId(state?.heroSmsCountryId));
+    if (Array.from(selectHeroSmsCountry.options).some((option) => option.value === restoredCountryId)) {
+      selectHeroSmsCountry.value = restoredCountryId;
+    }
+    updateHeroSmsPlatformDisplay(state?.heroSmsCountryLabel || getSelectedHeroSmsCountryOption().label);
   }
   if (state?.autoRunTotalRuns) {
     inputRunCount.value = String(state.autoRunTotalRuns);
@@ -4975,6 +5072,20 @@ inputVerificationResendCount?.addEventListener('blur', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+inputHeroSmsApiKey?.addEventListener('input', () => {
+  markSettingsDirty(true);
+  scheduleSettingsAutoSave();
+});
+inputHeroSmsApiKey?.addEventListener('blur', () => {
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+selectHeroSmsCountry?.addEventListener('change', () => {
+  updateHeroSmsPlatformDisplay(getSelectedHeroSmsCountryOption().label);
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
 // ============================================================
 // Listen for Background broadcasts
 // ============================================================
@@ -5222,6 +5333,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           )
         );
       }
+      if (message.payload.heroSmsApiKey !== undefined && inputHeroSmsApiKey) {
+        inputHeroSmsApiKey.value = message.payload.heroSmsApiKey || '';
+      }
+      if (
+        (message.payload.heroSmsCountryId !== undefined || message.payload.heroSmsCountryLabel !== undefined)
+        && selectHeroSmsCountry
+      ) {
+        const nextCountryId = String(
+          normalizeHeroSmsCountryId(
+            message.payload.heroSmsCountryId !== undefined
+              ? message.payload.heroSmsCountryId
+              : selectHeroSmsCountry.value
+          )
+        );
+        if (Array.from(selectHeroSmsCountry.options).some((option) => option.value === nextCountryId)) {
+          selectHeroSmsCountry.value = nextCountryId;
+        }
+        updateHeroSmsPlatformDisplay(message.payload.heroSmsCountryLabel || getSelectedHeroSmsCountryOption().label);
+      }
       renderContributionMode();
       break;
     }
@@ -5325,19 +5455,23 @@ setMail2925Mode(DEFAULT_MAIL_2925_MODE);
 initializeReleaseInfo().catch((err) => {
   console.error('Failed to initialize release info:', err);
 });
-restoreState().then(() => {
-  syncPasswordToggleLabel();
-  syncVpsUrlToggleLabel();
-  syncVpsPasswordToggleLabel();
-  updatePanelModeUI();
-  updateButtonStates();
-  updateStatusDisplay(latestState);
-  return refreshContributionContentHint()
-    .catch((error) => {
-      console.warn('Failed to refresh contribution content hint during initialization:', error);
-      return null;
-    })
-    .then(() => maybeShowNewUserGuidePrompt());
-}).catch((err) => {
-  console.error('Failed to initialize sidepanel state:', err);
+loadHeroSmsCountries().catch((err) => {
+  console.error('Failed to load HeroSMS countries:', err);
+}).finally(() => {
+  return restoreState().then(() => {
+    syncPasswordToggleLabel();
+    syncVpsUrlToggleLabel();
+    syncVpsPasswordToggleLabel();
+    updatePanelModeUI();
+    updateButtonStates();
+    updateStatusDisplay(latestState);
+    return refreshContributionContentHint()
+      .catch((error) => {
+        console.warn('Failed to refresh contribution content hint during initialization:', error);
+        return null;
+      })
+      .then(() => maybeShowNewUserGuidePrompt());
+  }).catch((err) => {
+    console.error('Failed to initialize sidepanel state:', err);
+  });
 });

@@ -21,6 +21,10 @@ if (document.documentElement.getAttribute(SIGNUP_PAGE_LISTENER_SENTINEL) !== '1'
       || message.type === 'PREPARE_SIGNUP_VERIFICATION'
       || message.type === 'RECOVER_AUTH_RETRY_PAGE'
       || message.type === 'RESEND_VERIFICATION_CODE'
+      || message.type === 'SUBMIT_PHONE_NUMBER'
+      || message.type === 'SUBMIT_PHONE_VERIFICATION_CODE'
+      || message.type === 'RESEND_PHONE_VERIFICATION_CODE'
+      || message.type === 'RETURN_TO_ADD_PHONE'
       || message.type === 'ENSURE_SIGNUP_ENTRY_READY'
       || message.type === 'ENSURE_SIGNUP_PASSWORD_PAGE_READY'
     ) {
@@ -76,6 +80,14 @@ async function handleCommand(message) {
       return await recoverCurrentAuthRetryPage(message.payload);
     case 'RESEND_VERIFICATION_CODE':
       return await resendVerificationCode(message.step);
+    case 'SUBMIT_PHONE_NUMBER':
+      return await phoneAuthHelpers.submitPhoneNumber(message.payload);
+    case 'SUBMIT_PHONE_VERIFICATION_CODE':
+      return await phoneAuthHelpers.submitPhoneVerificationCode(message.payload);
+    case 'RESEND_PHONE_VERIFICATION_CODE':
+      return await phoneAuthHelpers.resendPhoneVerificationCode();
+    case 'RETURN_TO_ADD_PHONE':
+      return await phoneAuthHelpers.returnToAddPhone();
     case 'ENSURE_SIGNUP_ENTRY_READY':
       return await ensureSignupEntryReady();
     case 'ENSURE_SIGNUP_PASSWORD_PAGE_READY':
@@ -959,6 +971,12 @@ function getLoginVerificationDisplayedEmail() {
   return matches[0] ? String(matches[0]).trim().toLowerCase() : '';
 }
 
+function getPhoneVerificationDisplayedPhone() {
+  const pageText = getPageTextSnapshot();
+  const matches = pageText.match(/\+\d[\d\s-]{6,}\d/g) || [];
+  return matches[0] ? String(matches[0]).replace(/\s+/g, ' ').trim() : '';
+}
+
 function getOAuthConsentForm() {
   return document.querySelector(OAUTH_CONSENT_FORM_SELECTOR);
 }
@@ -1019,6 +1037,9 @@ function isVerificationPageStillVisible() {
   if (getCurrentAuthRetryPageState('signup_password') || getCurrentAuthRetryPageState('login')) {
     return false;
   }
+  if (isPhoneVerificationPageReady()) {
+    return false;
+  }
   if (getVerificationCodeTarget()) return true;
   if (findResendVerificationCodeTrigger({ allowDisabled: true })) return true;
   if (document.querySelector('form[action*="email-verification" i]')) return true;
@@ -1044,14 +1065,67 @@ function isAddPhonePageReady() {
   return ADD_PHONE_PAGE_PATTERN.test(getPageTextSnapshot());
 }
 
+function isPhoneVerificationPageReady() {
+  const path = `${location.pathname || ''} ${location.href || ''}`;
+  if (/\/phone-verification(?:[/?#]|$)/i.test(path)) {
+    return true;
+  }
+
+  const form = document.querySelector('form[action*="/phone-verification" i]');
+  if (form && isVisibleElement(form)) {
+    return true;
+  }
+
+  if (document.querySelector('button[name="intent"][value="resend"]') && getPhoneVerificationDisplayedPhone()) {
+    return true;
+  }
+
+  const pageText = getPageTextSnapshot();
+  const displayedPhone = getPhoneVerificationDisplayedPhone();
+  return Boolean(getVerificationCodeTarget())
+    && Boolean(displayedPhone)
+    && /check\s+your\s+phone|phone\s+verification|verify\s+your\s+phone|sms|text\s+message|code\s+to\s+\+/.test(pageText);
+}
+
 function isStep8Ready() {
   const continueBtn = getPrimaryContinueButton();
   if (!continueBtn) return false;
   if (isVerificationPageStillVisible()) return false;
+  if (isPhoneVerificationPageReady()) return false;
   if (isAddPhonePageReady()) return false;
 
   return isOAuthConsentPage();
 }
+
+const phoneAuthHelpers = self.MultiPagePhoneAuth?.createPhoneAuthHelpers?.({
+  fillInput,
+  getActionText,
+  getPageTextSnapshot,
+  getVerificationErrorText,
+  humanPause,
+  isActionEnabled,
+  isAddPhonePageReady,
+  isConsentReady: isStep8Ready,
+  isPhoneVerificationPageReady,
+  isVisibleElement,
+  simulateClick,
+  sleep,
+  throwIfStopped,
+  waitForElement,
+}) || {
+  submitPhoneNumber: async () => {
+    throw new Error('Phone auth helpers are unavailable.');
+  },
+  submitPhoneVerificationCode: async () => {
+    throw new Error('Phone auth helpers are unavailable.');
+  },
+  resendPhoneVerificationCode: async () => {
+    throw new Error('Phone auth helpers are unavailable.');
+  },
+  returnToAddPhone: async () => {
+    throw new Error('Phone auth helpers are unavailable.');
+  },
+};
 
 function normalizeInlineText(text) {
   return (text || '').replace(/\s+/g, ' ').trim();
@@ -1453,6 +1527,7 @@ function inspectLoginAuthState() {
   const submitButton = getLoginSubmitButton({ allowDisabled: true });
   const verificationVisible = isVerificationPageStillVisible();
   const addPhonePage = isAddPhonePageReady();
+  const phoneVerificationPage = isPhoneVerificationPageReady();
   const consentReady = isStep8Ready();
   const oauthConsentPage = isOAuthConsentPage();
   const baseState = {
@@ -1472,6 +1547,7 @@ function inspectLoginAuthState() {
     switchTrigger,
     verificationVisible,
     addPhonePage,
+    phoneVerificationPage,
     oauthConsentPage,
     consentReady,
   };
@@ -1480,6 +1556,14 @@ function inspectLoginAuthState() {
     return {
       ...baseState,
       state: 'login_timeout_error_page',
+    };
+  }
+
+  if (phoneVerificationPage) {
+    return {
+      ...baseState,
+      state: 'phone_verification_page',
+      displayedPhone: getPhoneVerificationDisplayedPhone(),
     };
   }
 
@@ -1538,6 +1622,7 @@ function serializeLoginAuthState(snapshot) {
     hasSwitchTrigger: Boolean(snapshot?.switchTrigger),
     verificationVisible: Boolean(snapshot?.verificationVisible),
     addPhonePage: Boolean(snapshot?.addPhonePage),
+    phoneVerificationPage: Boolean(snapshot?.phoneVerificationPage),
     oauthConsentPage: Boolean(snapshot?.oauthConsentPage),
     consentReady: Boolean(snapshot?.consentReady),
   };
@@ -2791,6 +2876,7 @@ function getStep8State() {
     consentReady: isStep8Ready(),
     verificationPage: isVerificationPageStillVisible(),
     addPhonePage: isAddPhonePageReady(),
+    phoneVerificationPage: isPhoneVerificationPageReady(),
     retryPage: Boolean(retryState),
     retryEnabled: Boolean(retryState?.retryEnabled),
     retryTitleMatched: Boolean(retryState?.titleMatched),

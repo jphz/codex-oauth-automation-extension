@@ -41,11 +41,11 @@
       await addLog('步骤 9：正在监听 localhost 回调地址...');
 
       const callbackTimeoutMs = typeof getOAuthFlowStepTimeoutMs === 'function'
-        ? await getOAuthFlowStepTimeoutMs(120000, {
+        ? await getOAuthFlowStepTimeoutMs(240000, {
           step: 9,
           actionLabel: 'OAuth localhost 回调',
         })
-        : 120000;
+        : 240000;
 
       return new Promise((resolve, reject) => {
         let resolved = false;

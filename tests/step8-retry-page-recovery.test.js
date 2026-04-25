@@ -131,3 +131,72 @@ return {
     /当前认证页已进入重试页/
   );
 });
+
+test('step 8 ready check completes phone verification flow before waiting for OAuth consent', async () => {
+  const api = new Function(`
+let pollCount = 0;
+const phoneVerificationCalls = [];
+
+function throwIfStopped() {}
+async function sleepWithStop() {}
+async function ensureStep8SignupPageReady() {}
+const phoneVerificationHelpers = {
+  async completePhoneVerificationFlow(tabId, pageState) {
+    phoneVerificationCalls.push({ tabId, pageState });
+    return {
+      success: true,
+      consentReady: true,
+      url: 'https://auth.openai.com/authorize',
+    };
+  },
+};
+async function getStep8PageState() {
+  pollCount += 1;
+  if (pollCount === 1) {
+    return {
+      url: 'https://auth.openai.com/add-phone',
+      addPhonePage: true,
+      phoneVerificationPage: false,
+      consentReady: false,
+    };
+  }
+  return {
+    url: 'https://auth.openai.com/authorize',
+    addPhonePage: false,
+    phoneVerificationPage: false,
+    consentReady: true,
+  };
+}
+
+${extractFunction('waitForStep8Ready')}
+
+return {
+  async run() {
+    return {
+      result: await waitForStep8Ready(88, 1000),
+      phoneVerificationCalls,
+    };
+  },
+};
+`)();
+
+  const { result, phoneVerificationCalls } = await api.run();
+
+  assert.deepStrictEqual(phoneVerificationCalls, [
+    {
+      tabId: 88,
+      pageState: {
+        url: 'https://auth.openai.com/add-phone',
+        addPhonePage: true,
+        phoneVerificationPage: false,
+        consentReady: false,
+      },
+    },
+  ]);
+  assert.deepStrictEqual(result, {
+    url: 'https://auth.openai.com/authorize',
+    addPhonePage: false,
+    phoneVerificationPage: false,
+    consentReady: true,
+  });
+});

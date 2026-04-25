@@ -48,6 +48,7 @@
         "content/activation-utils.js",
         "content/utils.js",
         "content/auth-page-recovery.js",
+        "content/phone-auth.js",
         "content/signup-page.js"
       ],
       "run_at": "document_idle"

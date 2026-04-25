@@ -3,6 +3,7 @@
 importScripts(
   'managed-alias-utils.js',
   'mail2925-utils.js',
+  'background/phone-verification-flow.js',
   'background/account-run-history.js',
   'background/contribution-oauth.js',
   'background/mail-2925-session.js',
@@ -188,6 +189,11 @@ const DEFAULT_HOTMAIL_LOCAL_BASE_URL = 'http://127.0.0.1:17373';
 const DEFAULT_ACCOUNT_RUN_HISTORY_HELPER_BASE_URL = DEFAULT_HOTMAIL_LOCAL_BASE_URL;
 const HOTMAIL_LOCAL_HELPER_TIMEOUT_MS = 45000;
 const DEFAULT_LUCKMAIL_PROJECT_CODE = 'openai';
+const DEFAULT_HERO_SMS_BASE_URL = 'https://hero-sms.com/stubs/handler_api.php';
+const HERO_SMS_SERVICE_CODE = 'dr';
+const HERO_SMS_SERVICE_LABEL = 'OpenAI';
+const HERO_SMS_COUNTRY_ID = 52;
+const HERO_SMS_COUNTRY_LABEL = 'Thailand';
 const DISPLAY_TIMEZONE = 'Asia/Shanghai';
 const MICROSOFT_TOKEN_DNR_RULE_ID = 1001;
 const PERSISTENT_ALIAS_STATE_KEYS = ['manualAliasUsage', 'preservedAliases'];
@@ -295,6 +301,9 @@ const PERSISTED_SETTING_DEFAULTS = {
   cloudflareTempEmailDomains: [],
   hotmailAccounts: [],
   mail2925Accounts: [],
+  heroSmsApiKey: '',
+  heroSmsCountryId: HERO_SMS_COUNTRY_ID,
+  heroSmsCountryLabel: HERO_SMS_COUNTRY_LABEL,
 };
 
 const PERSISTED_SETTING_KEYS = Object.keys(PERSISTED_SETTING_DEFAULTS);
@@ -354,6 +363,8 @@ const DEFAULT_STATE = {
   luckmailPreserveTagName: DEFAULT_LUCKMAIL_PRESERVE_TAG_NAME,
   currentLuckmailPurchase: null,
   currentLuckmailMailCursor: null,
+  currentPhoneActivation: null,
+  reusablePhoneActivation: null,
   autoRunning: false, // 当前是否处于自动运行中。
   autoRunPhase: 'idle', // 当前自动运行阶段。
   autoRunCurrentRun: 0, // 自动运行当前执行到第几轮。
@@ -1022,6 +1033,12 @@ function normalizePersistentSettingValue(key, value) {
       return normalizeHotmailAccounts(value);
     case 'mail2925Accounts':
       return normalizeMail2925Accounts(value);
+    case 'heroSmsApiKey':
+      return String(value || '');
+    case 'heroSmsCountryId':
+      return Math.max(1, Math.floor(Number(value) || HERO_SMS_COUNTRY_ID));
+    case 'heroSmsCountryLabel':
+      return String(value || HERO_SMS_COUNTRY_LABEL).trim() || HERO_SMS_COUNTRY_LABEL;
     default:
       return value;
   }
@@ -6429,7 +6446,7 @@ async function resumeAutoRun() {
 // ============================================================
 
 const SIGNUP_ENTRY_URL = 'https://chatgpt.com/';
-const SIGNUP_PAGE_INJECT_FILES = ['content/utils.js', 'content/auth-page-recovery.js', 'content/signup-page.js'];
+const SIGNUP_PAGE_INJECT_FILES = ['content/utils.js', 'content/auth-page-recovery.js', 'content/phone-auth.js', 'content/signup-page.js'];
 const panelBridge = self.MultiPageBackgroundPanelBridge?.createPanelBridge({
   chrome,
   addLog,
@@ -6501,6 +6518,21 @@ const verificationFlowHelpers = self.MultiPageBackgroundVerificationFlow?.create
   sleepWithStop,
   throwIfStopped,
   VERIFICATION_POLL_MAX_ROUNDS,
+});
+const phoneVerificationHelpers = self.MultiPageBackgroundPhoneVerification?.createPhoneVerificationHelpers({
+  addLog,
+  DEFAULT_HERO_SMS_BASE_URL,
+  ensureStep8SignupPageReady,
+  getOAuthFlowStepTimeoutMs,
+  getState,
+  HERO_SMS_COUNTRY_ID,
+  HERO_SMS_COUNTRY_LABEL,
+  HERO_SMS_SERVICE_CODE,
+  HERO_SMS_SERVICE_LABEL,
+  sendToContentScriptResilient,
+  setState,
+  sleepWithStop,
+  throwIfStopped,
 });
 const step1Executor = self.MultiPageBackgroundStep1?.createStep1Executor({
   addLog,
@@ -7211,10 +7243,22 @@ function isAddPhoneAuthState(authState = {}) {
 async function getPostStep6AutoRestartDecision(step, error) {
   const normalizedStep = Number(step);
   const errorMessage = getErrorMessage(error);
+  const shouldForceRestartFromStep7 = /restart step 7 with a new number/i.test(errorMessage);
   if (!Number.isFinite(normalizedStep) || normalizedStep < 7 || normalizedStep > LAST_STEP_ID) {
     return {
       shouldRestart: false,
       blockedByAddPhone: false,
+      forcedByPhoneVerificationTimeout: false,
+      errorMessage,
+      authState: null,
+    };
+  }
+
+  if (shouldForceRestartFromStep7) {
+    return {
+      shouldRestart: true,
+      blockedByAddPhone: false,
+      forcedByPhoneVerificationTimeout: true,
       errorMessage,
       authState: null,
     };
@@ -7224,6 +7268,7 @@ async function getPostStep6AutoRestartDecision(step, error) {
     return {
       shouldRestart: false,
       blockedByAddPhone: true,
+      forcedByPhoneVerificationTimeout: false,
       errorMessage,
       authState: null,
     };
@@ -7246,6 +7291,7 @@ async function getPostStep6AutoRestartDecision(step, error) {
     return {
       shouldRestart: false,
       blockedByAddPhone: true,
+      forcedByPhoneVerificationTimeout: false,
       errorMessage,
       authState,
     };
@@ -7254,6 +7300,7 @@ async function getPostStep6AutoRestartDecision(step, error) {
   return {
     shouldRestart: true,
     blockedByAddPhone: false,
+    forcedByPhoneVerificationTimeout: false,
     errorMessage,
     authState,
   };
@@ -7375,7 +7422,7 @@ let step8TabUpdatedListener = null;
 let step8PendingReject = null;
 const STEP8_CLICK_EFFECT_TIMEOUT_MS = 15000;
 const STEP8_CLICK_RETRY_DELAY_MS = 500;
-const STEP8_READY_WAIT_TIMEOUT_MS = 30000;
+const STEP8_READY_WAIT_TIMEOUT_MS = 180000;
 const STEP8_MAX_ROUNDS = 5;
 const STEP8_STRATEGIES = [
   { mode: 'content', strategy: 'requestSubmit', label: 'form.requestSubmit' },
@@ -7479,6 +7526,12 @@ async function waitForStep8Ready(tabId, timeoutMs = STEP8_READY_WAIT_TIMEOUT_MS)
     const pageState = await getStep8PageState(tabId);
     if (pageState?.maxCheckAttemptsBlocked) {
       throw new Error(`${CLOUDFLARE_SECURITY_BLOCK_ERROR_PREFIX}${CLOUDFLARE_SECURITY_BLOCK_USER_MESSAGE}`);
+    }
+    if (pageState?.addPhonePage || pageState?.phoneVerificationPage) {
+      await phoneVerificationHelpers.completePhoneVerificationFlow(tabId, pageState);
+      recovered = false;
+      await sleepWithStop(250);
+      continue;
     }
     if (pageState?.addPhonePage) {
       throw new Error('步骤 9：认证页进入了手机号页面，当前不是 OAuth 同意页，无法继续自动授权。');

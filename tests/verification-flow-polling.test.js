@@ -280,7 +280,7 @@ test('verification flow skips 2925 mailbox preclear when using a fixed signup ma
   assert.deepStrictEqual(mailMessages, ['POLL_EMAIL', 'DELETE_ALL_EMAILS']);
 });
 
-test('verification flow treats add-phone after login code submit as fatal instead of completing step 8', async () => {
+test('verification flow completes step 8 and flags phone verification when add-phone appears after login code submit', async () => {
   const events = [];
 
   const helpers = api.createVerificationFlowHelpers({
@@ -330,18 +330,21 @@ test('verification flow treats add-phone after login code submit as fatal instea
     VERIFICATION_POLL_MAX_ROUNDS: 5,
   });
 
-  await assert.rejects(
-    () => helpers.resolveVerificationStep(
-      8,
-      { email: 'user@example.com', lastLoginCode: null },
-      { provider: 'qq', label: 'QQ 邮箱' },
-      {}
-    ),
-    /验证码提交后页面进入手机号页面/
+  const result = await helpers.resolveVerificationStep(
+    8,
+    { email: 'user@example.com', lastLoginCode: null },
+    { provider: 'qq', label: 'QQ Mail' },
+    {}
   );
 
+  assert.deepStrictEqual(result, {
+    phoneVerificationRequired: true,
+    url: 'https://auth.openai.com/add-phone',
+  });
   assert.deepStrictEqual(events, [
     ['submit', '654321'],
+    ['state', '654321'],
+    ['complete', '654321'],
   ]);
 });
 

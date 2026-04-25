@@ -1098,6 +1098,67 @@ function isStep5Ready() {
   );
 }
 
+function isSignupProfilePageUrl(rawUrl = location.href) {
+  const url = String(rawUrl || '').trim();
+  if (!url) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(url);
+    const host = String(parsed.hostname || '').toLowerCase();
+    if (!['auth.openai.com', 'auth0.openai.com', 'accounts.openai.com'].includes(host)) {
+      return false;
+    }
+    return /\/create-account\/profile(?:[/?#]|$)/i.test(String(parsed.pathname || ''));
+  } catch {
+    return false;
+  }
+}
+
+function isLikelyLoggedInChatgptHomeUrl(rawUrl = location.href) {
+  const url = String(rawUrl || '').trim();
+  if (!url) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(url);
+    const host = String(parsed.hostname || '').toLowerCase();
+    if (!['chatgpt.com', 'www.chatgpt.com', 'chat.openai.com'].includes(host)) {
+      return false;
+    }
+
+    const path = String(parsed.pathname || '');
+    if (/^\/(?:auth\/|create-account\/|email-verification|log-in|add-phone)(?:[/?#]|$)/i.test(path)) {
+      return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getStep4PostVerificationState() {
+  if (isStep5Ready() || isSignupProfilePageUrl()) {
+    return {
+      state: 'step5',
+      url: location.href,
+    };
+  }
+
+  if (isLikelyLoggedInChatgptHomeUrl()) {
+    return {
+      state: 'logged_in_home',
+      skipProfileStep: true,
+      url: location.href,
+    };
+  }
+
+  return null;
+}
+
 function getPageTextSnapshot() {
   return (document.body?.innerText || document.body?.textContent || '')
     .replace(/\s+/g, ' ')
@@ -2056,8 +2117,17 @@ function isSignupEmailAlreadyExistsPage() {
 }
 
 function inspectSignupVerificationState() {
-  if (isStep5Ready()) {
+  const postVerificationState = getStep4PostVerificationState();
+  if (postVerificationState?.state === 'step5') {
     return { state: 'step5' };
+  }
+
+  if (postVerificationState?.state === 'logged_in_home') {
+    return {
+      state: 'logged_in_home',
+      skipProfileStep: true,
+      url: postVerificationState.url || location.href,
+    };
   }
 
   if (isSignupPasswordErrorPage()) {
@@ -2096,7 +2166,13 @@ async function waitForSignupVerificationTransition(timeout = 5000) {
     throwIfStopped();
 
     const snapshot = inspectSignupVerificationState();
-    if (snapshot.state === 'step5' || snapshot.state === 'verification' || snapshot.state === 'error' || snapshot.state === 'email_exists') {
+    if (
+      snapshot.state === 'step5'
+      || snapshot.state === 'logged_in_home'
+      || snapshot.state === 'verification'
+      || snapshot.state === 'error'
+      || snapshot.state === 'email_exists'
+    ) {
       return snapshot;
     }
 
@@ -2126,6 +2202,20 @@ async function prepareSignupVerificationFlow(payload = {}, timeout = 30000) {
     if (snapshot.state === 'step5') {
       log(`${prepareLogLabel}：页面已进入验证码后的下一阶段，本步骤按已完成处理。`, 'ok');
       return { ready: true, alreadyVerified: true, retried: recoveryRound, prepareSource };
+    }
+
+    if (snapshot.state === 'logged_in_home') {
+      /*
+      log(`${prepareLogLabel}锛氶〉闈㈠凡鐩存帴杩涘叆 ChatGPT 宸茬櫥褰曟€侊紝鏈楠?鎸夊凡瀹屾垚澶勭悊锛屽苟灏嗚烦杩囨楠?5銆俙, 'ok');
+      */
+      log(`${prepareLogLabel}：页面已直接进入 ChatGPT 已登录态，本步骤按已完成处理，并将跳过步骤 5。`, 'ok');
+      return {
+        ready: true,
+        alreadyVerified: true,
+        skipProfileStep: true,
+        retried: recoveryRound,
+        prepareSource,
+      };
     }
 
     if (snapshot.state === 'verification') {
@@ -2215,13 +2305,23 @@ async function waitForVerificationSubmitOutcome(step, timeout) {
       continue;
     }
 
+    if (step === 4) {
+      const postVerificationState = getStep4PostVerificationState();
+      if (postVerificationState?.state === 'logged_in_home') {
+        return {
+          success: true,
+          skipProfileStep: true,
+          url: postVerificationState.url || location.href,
+        };
+      }
+      if (postVerificationState?.state === 'step5') {
+        return { success: true };
+      }
+    }
+
     const errorText = getVerificationErrorText();
     if (errorText) {
       return { invalidCode: true, errorText };
-    }
-
-    if (step === 4 && isStep5Ready()) {
-      return { success: true };
     }
 
     if (step === 8 && isStep8Ready()) {
@@ -2239,6 +2339,18 @@ async function waitForVerificationSubmitOutcome(step, timeout) {
     const signupRetryState = getCurrentAuthRetryPageState('signup');
     if (signupRetryState?.userAlreadyExistsBlocked) {
       throw createSignupUserAlreadyExistsError();
+    }
+
+    const postVerificationState = getStep4PostVerificationState();
+    if (postVerificationState?.state === 'logged_in_home') {
+      return {
+        success: true,
+        skipProfileStep: true,
+        url: postVerificationState.url || location.href,
+      };
+    }
+    if (postVerificationState?.state === 'step5') {
+      return { success: true };
     }
   }
 

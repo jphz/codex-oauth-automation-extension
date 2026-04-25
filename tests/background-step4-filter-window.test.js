@@ -165,3 +165,57 @@ test('step 4 checks iCloud session before polling iCloud mailbox', async () => {
   assert.equal(icloudChecks, 1);
   assert.equal(resolved, true);
 });
+
+test('step 4 forwards skipProfileStep when prepare stage already reached logged-in home', async () => {
+  const completions = [];
+  let resolveCalls = 0;
+
+  const executor = api.createStep4Executor({
+    addLog: async () => {},
+    chrome: {
+      tabs: {
+        update: async () => {},
+      },
+    },
+    completeStepFromBackground: async (step, payload) => {
+      completions.push({ step, payload });
+    },
+    confirmCustomVerificationStepBypass: async () => {},
+    ensureMail2925MailboxSession: async () => {},
+    getMailConfig: () => ({
+      provider: '163',
+      label: '163 邮箱',
+      source: 'mail-163',
+      url: 'https://mail.163.com',
+    }),
+    getTabId: async () => 1,
+    HOTMAIL_PROVIDER: 'hotmail-api',
+    isTabAlive: async () => true,
+    LUCKMAIL_PROVIDER: 'luckmail-api',
+    CLOUDFLARE_TEMP_EMAIL_PROVIDER: 'cloudflare-temp-email',
+    resolveVerificationStep: async () => {
+      resolveCalls += 1;
+    },
+    reuseOrCreateTab: async () => {},
+    sendToContentScriptResilient: async () => ({
+      alreadyVerified: true,
+      skipProfileStep: true,
+    }),
+    shouldUseCustomRegistrationEmail: () => false,
+    STANDARD_MAIL_VERIFICATION_RESEND_INTERVAL_MS: 25000,
+    throwIfStopped: () => {},
+  });
+
+  await executor.executeStep4({
+    email: 'user@example.com',
+    password: 'secret',
+  });
+
+  assert.deepStrictEqual(completions, [
+    {
+      step: 4,
+      payload: { skipProfileStep: true },
+    },
+  ]);
+  assert.equal(resolveCalls, 0);
+});

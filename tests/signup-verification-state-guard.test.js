@@ -98,6 +98,10 @@ return {
 
 test('signup verification state should prioritize retry error page over verification visibility', () => {
   const api = new Function(`
+const location = {
+  href: 'https://auth.openai.com/email-verification',
+};
+
 function isStep5Ready() {
   return false;
 }
@@ -126,6 +130,9 @@ function getSignupPasswordSubmitButton() {
   return null;
 }
 
+${extractFunction('isSignupProfilePageUrl')}
+${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
+${extractFunction('getStep4PostVerificationState')}
 ${extractFunction('inspectSignupVerificationState')}
 
 return {
@@ -177,6 +184,9 @@ function getSignupPasswordSubmitButton() {
 ${extractFunction('getSignupAuthRetryPathPatterns')}
 ${extractFunction('getSignupPasswordTimeoutErrorPageState')}
 ${extractFunction('isSignupPasswordErrorPage')}
+${extractFunction('isSignupProfilePageUrl')}
+${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
+${extractFunction('getStep4PostVerificationState')}
 ${extractFunction('inspectSignupVerificationState')}
 
 return {
@@ -190,5 +200,56 @@ return {
     state: 'error',
     retryButton: { textContent: 'Try again' },
     userAlreadyExistsBlocked: false,
+  });
+});
+
+test('signup verification state treats profile url as step5 before fields finish rendering', () => {
+  const api = new Function(`
+const location = {
+  href: 'https://auth.openai.com/create-account/profile',
+};
+
+function isStep5Ready() {
+  return false;
+}
+
+function isVerificationPageStillVisible() {
+  return false;
+}
+
+function isSignupPasswordErrorPage() {
+  return false;
+}
+
+function getSignupPasswordTimeoutErrorPageState() {
+  return null;
+}
+
+function isSignupEmailAlreadyExistsPage() {
+  return false;
+}
+
+function getSignupPasswordInput() {
+  return null;
+}
+
+function getSignupPasswordSubmitButton() {
+  return null;
+}
+
+${extractFunction('isSignupProfilePageUrl')}
+${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
+${extractFunction('getStep4PostVerificationState')}
+${extractFunction('inspectSignupVerificationState')}
+
+return {
+  run() {
+    return inspectSignupVerificationState();
+  },
+};
+`)();
+
+  assert.deepStrictEqual(api.run(), {
+    state: 'step5',
   });
 });

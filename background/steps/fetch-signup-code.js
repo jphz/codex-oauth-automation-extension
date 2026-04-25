@@ -103,7 +103,7 @@
         throw new Error(prepareResult.error);
       }
       if (prepareResult?.alreadyVerified) {
-        await completeStepFromBackground(4, {});
+        await completeStepFromBackground(4, prepareResult?.skipProfileStep ? { skipProfileStep: true } : {});
         return;
       }
 

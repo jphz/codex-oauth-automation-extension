@@ -131,6 +131,9 @@ ${extractFunction('getVerificationSubmitButtonForTarget')}
 ${extractFunction('waitForVerificationSubmitButton')}
 ${extractFunction('waitForVerificationCodeTarget')}
 ${extractFunction('waitForSplitVerificationInputsFilled')}
+${extractFunction('isSignupProfilePageUrl')}
+${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
+${extractFunction('getStep4PostVerificationState')}
 ${extractFunction('fillVerificationCode')}
 
 return {

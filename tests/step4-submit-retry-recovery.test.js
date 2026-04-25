@@ -84,6 +84,9 @@ async function recoverCurrentAuthRetryPage() {
 }
 async function sleep() {}
 
+${extractFunction('isSignupProfilePageUrl')}
+${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
+${extractFunction('getStep4PostVerificationState')}
 ${extractFunction('waitForVerificationSubmitOutcome')}
 
 return {
@@ -131,6 +134,9 @@ async function recoverCurrentAuthRetryPage() {
 }
 async function sleep() {}
 
+${extractFunction('isSignupProfilePageUrl')}
+${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
+${extractFunction('getStep4PostVerificationState')}
 ${extractFunction('waitForVerificationSubmitOutcome')}
 
 return {
@@ -148,4 +154,47 @@ return {
     /连续进入认证重试页 2 次，页面仍未恢复/
   );
   assert.equal(api.snapshot().recoverCalls, 2);
+});
+
+test('waitForVerificationSubmitOutcome marks step 5 skipped when step 4 already lands on chatgpt home', async () => {
+  const api = new Function(`
+const location = { href: 'https://chatgpt.com/' };
+
+function throwIfStopped() {}
+function log() {}
+function getVerificationErrorText() { return ''; }
+function isStep5Ready() { return false; }
+function isStep8Ready() { return false; }
+function isAddPhonePageReady() { return false; }
+function isVerificationPageStillVisible() { return false; }
+function createSignupUserAlreadyExistsError() {
+  return new Error('SIGNUP_USER_ALREADY_EXISTS::步骤 4：检测到 user_already_exists，说明当前用户已存在，当前轮将直接停止。');
+}
+function getCurrentAuthRetryPageState() {
+  return null;
+}
+async function recoverCurrentAuthRetryPage() {
+  throw new Error('should not recover retry page');
+}
+async function sleep() {}
+
+${extractFunction('isSignupProfilePageUrl')}
+${extractFunction('isLikelyLoggedInChatgptHomeUrl')}
+${extractFunction('getStep4PostVerificationState')}
+${extractFunction('waitForVerificationSubmitOutcome')}
+
+return {
+  run() {
+    return waitForVerificationSubmitOutcome(4, 1000);
+  },
+};
+`)();
+
+  const result = await api.run();
+
+  assert.deepStrictEqual(result, {
+    success: true,
+    skipProfileStep: true,
+    url: 'https://chatgpt.com/',
+  });
 });

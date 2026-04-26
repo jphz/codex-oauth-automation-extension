@@ -1,6 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const {
+  normalizeIcloudForwardMailProvider,
+  normalizeIcloudTargetMailboxType,
+} = require('../mail-provider-utils');
 
 const sidepanelSource = fs.readFileSync('sidepanel/sidepanel.js', 'utf8');
 
@@ -148,7 +152,7 @@ test('collectSettingsPayload persists currentMail2925AccountId for 2925 account 
     extractFunction('collectSettingsPayload'),
   ].join('\n');
 
-  const api = new Function(`
+  const api = new Function('normalizeIcloudTargetMailboxType', 'normalizeIcloudForwardMailProvider', `
 let latestState = {
   contributionMode: false,
   mail2925UseAccountPool: true,
@@ -222,7 +226,7 @@ function normalizeAutoStepDelaySeconds(value) { return value === '' ? null : Num
 function normalizeVerificationResendCount(value, fallback) { return Number(value) || fallback; }
 ${bundle}
 return { collectSettingsPayload };
-`)();
+`)(normalizeIcloudTargetMailboxType, normalizeIcloudForwardMailProvider);
 
   const payload = api.collectSettingsPayload();
 

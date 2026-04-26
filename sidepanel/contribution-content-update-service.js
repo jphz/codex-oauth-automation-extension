@@ -8,11 +8,12 @@
     return {
       slug: String(item?.slug || '').trim(),
       title: String(item?.title || '').trim(),
-      isEnabled: Boolean(item?.is_enabled),
-      hasContent: Boolean(item?.has_content),
-      isVisible: Boolean(item?.is_visible),
-      updatedAt: String(item?.updated_at || '').trim(),
-      updatedAtDisplay: String(item?.updated_at_display || '').trim(),
+      text: String(item?.text || '').trim(),
+      isEnabled: Boolean(item?.is_enabled ?? item?.isEnabled),
+      hasContent: Boolean(item?.has_content ?? item?.hasContent),
+      isVisible: Boolean(item?.is_visible ?? item?.isVisible),
+      updatedAt: String(item?.updated_at ?? item?.updatedAt ?? '').trim(),
+      updatedAtDisplay: String(item?.updated_at_display ?? item?.updatedAtDisplay ?? '').trim(),
     };
   }
 

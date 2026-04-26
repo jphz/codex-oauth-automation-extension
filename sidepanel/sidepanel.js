@@ -34,6 +34,7 @@ const updateReleaseList = document.getElementById('update-release-list');
 const btnOpenRelease = document.getElementById('btn-open-release');
 const settingsCard = document.getElementById('settings-card');
 const contributionModePanel = document.getElementById('contribution-mode-panel');
+const contributionModeBadge = document.getElementById('contribution-mode-badge');
 const contributionModeText = document.getElementById('contribution-mode-text');
 const inputContributionNickname = document.getElementById('input-contribution-nickname');
 const inputContributionQq = document.getElementById('input-contribution-qq');
@@ -99,6 +100,12 @@ const inputCodex2ApiUrl = document.getElementById('input-codex2api-url');
 const rowCodex2ApiAdminKey = document.getElementById('row-codex2api-admin-key');
 const inputCodex2ApiAdminKey = document.getElementById('input-codex2api-admin-key');
 const rowCustomPassword = document.getElementById('row-custom-password');
+const rowPlusMode = document.getElementById('row-plus-mode');
+const inputPlusModeEnabled = document.getElementById('input-plus-mode-enabled');
+const rowPaypalEmail = document.getElementById('row-paypal-email');
+const inputPaypalEmail = document.getElementById('input-paypal-email');
+const rowPaypalPassword = document.getElementById('row-paypal-password');
+const inputPaypalPassword = document.getElementById('input-paypal-password');
 const selectMailProvider = document.getElementById('select-mail-provider');
 const btnMailLogin = document.getElementById('btn-mail-login');
 const rowCustomMailProviderPool = document.getElementById('row-custom-mail-provider-pool');
@@ -140,6 +147,10 @@ const btnIcloudLoginDone = document.getElementById('btn-icloud-login-done');
 const btnIcloudRefresh = document.getElementById('btn-icloud-refresh');
 const btnIcloudDeleteUsed = document.getElementById('btn-icloud-delete-used');
 const selectIcloudHostPreference = document.getElementById('select-icloud-host-preference');
+const rowIcloudTargetMailboxType = document.getElementById('row-icloud-target-mailbox-type');
+const selectIcloudTargetMailboxType = document.getElementById('select-icloud-target-mailbox-type');
+const rowIcloudForwardMailProvider = document.getElementById('row-icloud-forward-mail-provider');
+const selectIcloudForwardMailProvider = document.getElementById('select-icloud-forward-mail-provider');
 const selectIcloudFetchMode = document.getElementById('select-icloud-fetch-mode');
 const checkboxAutoDeleteIcloud = document.getElementById('checkbox-auto-delete-icloud');
 const inputIcloudSearch = document.getElementById('input-icloud-search');
@@ -244,11 +255,12 @@ const btnAutoStartCancel = document.getElementById('btn-auto-start-cancel');
 const btnAutoStartRestart = document.getElementById('btn-auto-start-restart');
 const btnAutoStartContinue = document.getElementById('btn-auto-start-continue');
 const autoHintText = document.querySelector('.auto-hint');
-const stepDefinitions = (window.MultiPageStepDefinitions?.getSteps?.() || []).sort((left, right) => left.order - right.order);
-const STEP_IDS = stepDefinitions.map((step) => Number(step.id)).filter(Number.isFinite);
-const STEP_DEFAULT_STATUSES = Object.fromEntries(STEP_IDS.map((stepId) => [stepId, 'pending']));
-const SKIPPABLE_STEPS = new Set(STEP_IDS);
 const stepsList = document.querySelector('.steps-list');
+let currentPlusModeEnabled = false;
+let stepDefinitions = getStepDefinitionsForMode(false);
+let STEP_IDS = stepDefinitions.map((step) => Number(step.id)).filter(Number.isFinite);
+let STEP_DEFAULT_STATUSES = Object.fromEntries(STEP_IDS.map((stepId) => [stepId, 'pending']));
+let SKIPPABLE_STEPS = new Set(STEP_IDS);
 const AUTO_DELAY_MIN_MINUTES = 1;
 const AUTO_DELAY_MAX_MINUTES = 1440;
 const AUTO_DELAY_DEFAULT_MINUTES = 30;
@@ -269,8 +281,32 @@ const DEFAULT_MAIL_2925_MODE = MAIL_2925_MODE_PROVIDE;
 const NEW_USER_GUIDE_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-new-user-guide-prompt-dismissed';
 const AUTO_SKIP_FAILURES_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-auto-skip-failures-prompt-dismissed';
 const AUTO_RUN_FALLBACK_RISK_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-auto-run-fallback-risk-prompt-dismissed';
+const AUTO_RUN_PLUS_RISK_PROMPT_DISMISSED_STORAGE_KEY = 'multipage-auto-run-plus-risk-prompt-dismissed';
+const PLUS_CONTRIBUTION_PROMPT_LEDGER_STORAGE_KEY = 'multipage-plus-contribution-prompt-ledger';
+
+function getStepDefinitionsForMode(plusModeEnabled = false) {
+  return (window.MultiPageStepDefinitions?.getSteps?.({ plusModeEnabled }) || [])
+    .sort((left, right) => {
+      const leftOrder = Number.isFinite(left.order) ? left.order : left.id;
+      const rightOrder = Number.isFinite(right.order) ? right.order : right.id;
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+      return left.id - right.id;
+    });
+}
+
+function rebuildStepDefinitionState(plusModeEnabled = false) {
+  currentPlusModeEnabled = Boolean(plusModeEnabled);
+  stepDefinitions = getStepDefinitionsForMode(currentPlusModeEnabled);
+  STEP_IDS = stepDefinitions.map((step) => Number(step.id)).filter(Number.isFinite);
+  STEP_DEFAULT_STATUSES = Object.fromEntries(STEP_IDS.map((stepId) => [stepId, 'pending']));
+  SKIPPABLE_STEPS = new Set(STEP_IDS);
+}
 const CONTRIBUTION_CONTENT_PROMPT_DISMISSED_VERSION_STORAGE_KEY = 'multipage-contribution-content-prompt-dismissed-version';
 const AUTO_RUN_FALLBACK_RISK_WARNING_MIN_RUNS = 3;
+const AUTO_RUN_PLUS_RISK_WARNING_MAX_SAFE_RUNS = 3;
+const PLUS_CONTRIBUTION_PROMPT_THRESHOLD = 5;
+const PLUS_CONTRIBUTION_ACCOUNT_CREDIT = 5;
+const PLUS_CONTRIBUTION_DONATION_CREDIT = 20;
 const HOTMAIL_SERVICE_MODE_REMOTE = 'remote';
 const HOTMAIL_SERVICE_MODE_LOCAL = 'local';
 const ICLOUD_PROVIDER = 'icloud';
@@ -578,6 +614,28 @@ const normalizeIcloudFetchMode = (value) => {
   const normalized = String(value || '').trim().toLowerCase();
   return normalized === 'always_new' ? 'always_new' : 'reuse_existing';
 };
+const normalizeIcloudTargetMailboxType = window.MailProviderUtils?.normalizeIcloudTargetMailboxType
+  || ((value) => String(value || '').trim().toLowerCase() === 'forward-mailbox'
+    ? 'forward-mailbox'
+    : 'icloud-inbox');
+const getIcloudForwardMailProviderOptions = window.MailProviderUtils?.getIcloudForwardMailProviderOptions
+  || (() => Array.from(selectIcloudForwardMailProvider?.options || [])
+    .map((option) => ({
+      value: String(option?.value || '').trim().toLowerCase(),
+      label: String(option?.textContent || option?.label || option?.value || '').trim(),
+    }))
+    .filter((option) => option.value));
+const normalizeIcloudForwardMailProvider = window.MailProviderUtils?.normalizeIcloudForwardMailProvider
+  || ((value) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    const options = getIcloudForwardMailProviderOptions();
+    return options.some((option) => option.value === normalized)
+      ? normalized
+      : (options[0]?.value || 'qq');
+  });
+const ICLOUD_FORWARD_MAIL_PROVIDER_LABELS = Object.fromEntries(
+  getIcloudForwardMailProviderOptions().map((option) => [option.value, option.label])
+);
 const getIcloudLoginUrlForHost = window.IcloudUtils?.getIcloudLoginUrlForHost
   || ((host) => host === 'icloud.com.cn' ? 'https://www.icloud.com.cn/' : (host === 'icloud.com' ? 'https://www.icloud.com/' : ''));
 
@@ -995,8 +1053,162 @@ function setAutoRunFallbackRiskPromptDismissed(dismissed) {
   setPromptDismissed(AUTO_RUN_FALLBACK_RISK_PROMPT_DISMISSED_STORAGE_KEY, dismissed);
 }
 
+function isAutoRunPlusRiskPromptDismissed() {
+  return isPromptDismissed(AUTO_RUN_PLUS_RISK_PROMPT_DISMISSED_STORAGE_KEY);
+}
+
+function setAutoRunPlusRiskPromptDismissed(dismissed) {
+  setPromptDismissed(AUTO_RUN_PLUS_RISK_PROMPT_DISMISSED_STORAGE_KEY, dismissed);
+}
+
 function shouldWarnAutoRunFallbackRisk(totalRuns, autoRunSkipFailures) {
   return totalRuns >= AUTO_RUN_FALLBACK_RISK_WARNING_MIN_RUNS;
+}
+
+function shouldWarnPlusAutoRunRisk(totalRuns, plusModeEnabled) {
+  return Boolean(plusModeEnabled)
+    && Math.floor(Number(totalRuns) || 0) > AUTO_RUN_PLUS_RISK_WARNING_MAX_SAFE_RUNS;
+}
+
+function normalizePlusContributionPromptNumber(value) {
+  const number = Math.floor(Number(value) || 0);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function normalizePlusContributionPromptLedger(value = {}) {
+  const source = value && typeof value === 'object' ? value : {};
+  return {
+    promptBaseline: normalizePlusContributionPromptNumber(source.promptBaseline),
+    donationCredit: Math.max(0, normalizePlusContributionPromptNumber(source.donationCredit)),
+  };
+}
+
+function getPlusContributionPromptLedger() {
+  try {
+    return normalizePlusContributionPromptLedger(
+      JSON.parse(localStorage.getItem(PLUS_CONTRIBUTION_PROMPT_LEDGER_STORAGE_KEY) || '{}')
+    );
+  } catch {
+    return normalizePlusContributionPromptLedger();
+  }
+}
+
+function setPlusContributionPromptLedger(ledger) {
+  localStorage.setItem(
+    PLUS_CONTRIBUTION_PROMPT_LEDGER_STORAGE_KEY,
+    JSON.stringify(normalizePlusContributionPromptLedger(ledger))
+  );
+}
+
+function isSuccessfulPlusAccountRecord(record = {}) {
+  return record?.finalStatus === 'success' && Boolean(record.plusModeEnabled);
+}
+
+function getPlusContributionPromptTotals(records = []) {
+  return (Array.isArray(records) ? records : []).reduce((totals, record) => {
+    if (!isSuccessfulPlusAccountRecord(record)) {
+      return totals;
+    }
+    if (record.contributionMode) {
+      totals.contributionSuccess += 1;
+    } else {
+      totals.plusSuccess += 1;
+    }
+    return totals;
+  }, {
+    plusSuccess: 0,
+    contributionSuccess: 0,
+  });
+}
+
+function getPlusContributionPromptProgress(records = [], ledger = getPlusContributionPromptLedger()) {
+  const totals = getPlusContributionPromptTotals(records);
+  const normalizedLedger = normalizePlusContributionPromptLedger(ledger);
+  const credit = (totals.contributionSuccess * PLUS_CONTRIBUTION_ACCOUNT_CREDIT)
+    + normalizedLedger.donationCredit;
+  const netCount = totals.plusSuccess - credit;
+  const sinceLastPrompt = netCount - normalizedLedger.promptBaseline;
+  return {
+    ...totals,
+    credit,
+    netCount,
+    sinceLastPrompt,
+    shouldPrompt: sinceLastPrompt >= PLUS_CONTRIBUTION_PROMPT_THRESHOLD,
+  };
+}
+
+function shouldShowPlusContributionPrompt(records = [], plusModeEnabled = false, ledger = getPlusContributionPromptLedger()) {
+  return Boolean(plusModeEnabled)
+    && getPlusContributionPromptProgress(records, ledger).shouldPrompt;
+}
+
+function markPlusContributionPromptShown(records = [], ledger = getPlusContributionPromptLedger()) {
+  const progress = getPlusContributionPromptProgress(records, ledger);
+  const nextLedger = {
+    ...normalizePlusContributionPromptLedger(ledger),
+    promptBaseline: progress.netCount,
+  };
+  setPlusContributionPromptLedger(nextLedger);
+  return nextLedger;
+}
+
+function addPlusContributionPromptCredit(credit, ledger = getPlusContributionPromptLedger()) {
+  const normalizedLedger = normalizePlusContributionPromptLedger(ledger);
+  const nextLedger = {
+    ...normalizedLedger,
+    donationCredit: normalizedLedger.donationCredit + Math.max(0, normalizePlusContributionPromptNumber(credit)),
+  };
+  setPlusContributionPromptLedger(nextLedger);
+  return nextLedger;
+}
+
+function getPlusContributionSupportImageUrl() {
+  if (typeof chrome !== 'undefined' && chrome.runtime?.getURL) {
+    return chrome.runtime.getURL('docs/images/微信.png');
+  }
+  return '../docs/images/微信.png';
+}
+
+function buildPlusContributionSupportPromptHtml() {
+  const imageUrl = getPlusContributionSupportImageUrl();
+  return [
+    '<span class="plus-contribution-prompt-copy">您觉得这个 Plus 功能怎么样？您的账户数量应该已经够个人使用啦。</span>',
+    '<span class="plus-contribution-prompt-copy">可以打开贡献给作者贡献几个账号，以便于让作者开发更好的功能出来吗？或者打赏一下作者？</span>',
+    `<img class="plus-contribution-prompt-image" src="${escapeHtml(imageUrl)}" alt="微信打赏二维码" />`,
+  ].join('');
+}
+
+function openPlusContributionSupportModal() {
+  return openActionModal({
+    title: 'Plus 功能使用反馈',
+    messageHtml: buildPlusContributionSupportPromptHtml(),
+    actions: [
+      { id: null, label: '取消', variant: 'btn-ghost' },
+      { id: 'contribute', label: '去贡献账号', variant: 'btn-outline' },
+      { id: 'donated', label: '已打赏', variant: 'btn-primary' },
+    ],
+  });
+}
+
+async function maybeShowPlusContributionPromptBeforeAutoRun(plusModeEnabled) {
+  const records = Array.isArray(latestState?.accountRunHistory) ? latestState.accountRunHistory : [];
+  if (!shouldShowPlusContributionPrompt(records, plusModeEnabled)) {
+    return true;
+  }
+
+  const choice = await openPlusContributionSupportModal();
+  const ledger = markPlusContributionPromptShown(records);
+  if (choice === 'donated') {
+    addPlusContributionPromptCredit(PLUS_CONTRIBUTION_DONATION_CREDIT, ledger);
+    showToast('感谢打赏支持，已延后下一次 Plus 提醒。', 'success', 2200);
+    return true;
+  }
+  if (choice === 'contribute') {
+    openExternalUrl(getContributionPortalUrl());
+    showToast('已打开贡献页面，可以按页面提示贡献 Plus 账号。', 'info', 2200);
+    return false;
+  }
+  return true;
 }
 
 async function openAutoSkipFailuresConfirmModal() {
@@ -1017,6 +1229,19 @@ async function openAutoRunFallbackRiskConfirmModal(totalRuns) {
     title: '自动运行风险提醒',
     message: `当前轮数已经不适合单节点情况，请确保已经配置并打开节点轮询功能（若没有配置，请点击贡献/使用按钮，根据网页中使用教程进行配置），避免连续使用一个节点注册，导致出现手机号验证。`,
     confirmLabel: '继续',
+  });
+
+  return {
+    confirmed: result.confirmed,
+    dismissPrompt: result.optionChecked,
+  };
+}
+
+async function openPlusAutoRunRiskConfirmModal(totalRuns) {
+  const result = await openConfirmModalWithOption({
+    title: 'Plus 自动轮数提醒',
+    message: `Plus 模式下当前设置为 ${totalRuns} 轮。轮数过多可能造成 PayPal 或账号快速封号。建议够用就好：我注册了几个使用，没多注册，完全足够使用，并且没有封号。这个模式下只要可以注册成功就能使用，所以不要贪杯哦。`,
+    confirmLabel: '我知道了，继续',
   });
 
   return {
@@ -1100,7 +1325,8 @@ function isDoneStatus(status) {
 }
 
 function getStepStatuses(state = latestState) {
-  return { ...STEP_DEFAULT_STATUSES, ...(state?.stepStatuses || {}) };
+  const merged = { ...STEP_DEFAULT_STATUSES, ...(state?.stepStatuses || {}) };
+  return Object.fromEntries(STEP_IDS.map((stepId) => [stepId, merged[stepId] || 'pending']));
 }
 
 function getFirstUnfinishedStep(state = latestState) {
@@ -1666,6 +1892,14 @@ function collectSettingsPayload() {
   const icloudFetchModeRawValue = typeof selectIcloudFetchMode !== 'undefined'
     ? String(selectIcloudFetchMode?.value || '')
     : '';
+  const icloudTargetMailboxTypeValue = typeof selectIcloudTargetMailboxType !== 'undefined'
+    ? selectIcloudTargetMailboxType?.value
+    : '';
+  const icloudForwardMailProviderValue = typeof selectIcloudForwardMailProvider !== 'undefined'
+    ? selectIcloudForwardMailProvider?.value
+    : '';
+  const normalizedIcloudTargetMailboxType = normalizeIcloudTargetMailboxType(icloudTargetMailboxTypeValue);
+  const normalizedIcloudForwardMailProvider = normalizeIcloudForwardMailProvider(icloudForwardMailProviderValue);
   const mail2925UseAccountPool = typeof inputMail2925UseAccountPool !== 'undefined'
     ? Boolean(inputMail2925UseAccountPool?.checked)
     : Boolean(latestState?.mail2925UseAccountPool);
@@ -1679,7 +1913,9 @@ function collectSettingsPayload() {
       label: typeof DEFAULT_HERO_SMS_COUNTRY_LABEL !== 'undefined' ? DEFAULT_HERO_SMS_COUNTRY_LABEL : 'Thailand',
     };
   return {
-    panelMode: selectPanelMode.value,
+    ...(contributionModeEnabled ? {} : {
+      panelMode: selectPanelMode.value,
+    }),
     vpsUrl: inputVpsUrl.value.trim(),
     vpsPassword: inputVpsPassword.value,
     localCpaStep9Mode: getSelectedLocalCpaStep9Mode(),
@@ -1690,6 +1926,15 @@ function collectSettingsPayload() {
     sub2apiDefaultProxyName: inputSub2ApiDefaultProxy.value.trim(),
     codex2apiUrl: inputCodex2ApiUrl.value.trim(),
     codex2apiAdminKey: inputCodex2ApiAdminKey.value.trim(),
+    plusModeEnabled: typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled
+      ? Boolean(inputPlusModeEnabled.checked)
+      : Boolean(latestState?.plusModeEnabled),
+    paypalEmail: typeof inputPaypalEmail !== 'undefined' && inputPaypalEmail
+      ? inputPaypalEmail.value.trim()
+      : String(latestState?.paypalEmail || ''),
+    paypalPassword: typeof inputPaypalPassword !== 'undefined' && inputPaypalPassword
+      ? inputPaypalPassword.value
+      : String(latestState?.paypalPassword || ''),
     ...(contributionModeEnabled ? {} : {
       customPassword: inputPassword.value,
     }),
@@ -1706,6 +1951,8 @@ function collectSettingsPayload() {
       : [],
     autoDeleteUsedIcloudAlias: checkboxAutoDeleteIcloud?.checked,
     icloudHostPreference: selectIcloudHostPreference?.value || 'auto',
+    icloudTargetMailboxType: normalizedIcloudTargetMailboxType,
+    icloudForwardMailProvider: normalizedIcloudForwardMailProvider,
     icloudFetchMode: (icloudFetchModeRawValue.trim().toLowerCase() === 'always_new'
       ? 'always_new'
       : 'reuse_existing'),
@@ -1924,6 +2171,21 @@ function updatePhoneVerificationSettingsUI() {
   });
 }
 
+function updatePlusModeUI() {
+  const enabled = typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled
+    ? Boolean(inputPlusModeEnabled.checked)
+    : false;
+  [
+    typeof rowPaypalEmail !== 'undefined' ? rowPaypalEmail : null,
+    typeof rowPaypalPassword !== 'undefined' ? rowPaypalPassword : null,
+  ].forEach((row) => {
+    if (!row) {
+      return;
+    }
+    row.style.display = enabled ? '' : 'none';
+  });
+}
+
 function setSettingsCardLocked(locked) {
   if (!settingsCard) {
     return;
@@ -2104,6 +2366,9 @@ function applyAutoRunStatus(payload = currentAutoRun) {
 
 function initializeManualStepActions() {
   document.querySelectorAll('.step-row').forEach((row) => {
+    if (row.querySelector('.step-actions')) {
+      return;
+    }
     const step = Number(row.dataset.step);
     const statusEl = row.querySelector('.step-status');
     if (!statusEl) return;
@@ -2147,6 +2412,21 @@ function renderStepsList() {
   if (stepsProgress) {
     stepsProgress.textContent = `0 / ${STEP_IDS.length}`;
   }
+
+  initializeManualStepActions();
+  renderStepStatuses();
+  updateButtonStates();
+}
+
+function syncStepDefinitionsForMode(plusModeEnabled = false, options = {}) {
+  const nextPlusModeEnabled = Boolean(plusModeEnabled);
+  const shouldRender = Boolean(options.render) || nextPlusModeEnabled !== currentPlusModeEnabled;
+  if (!shouldRender) {
+    return;
+  }
+
+  rebuildStepDefinitionState(nextPlusModeEnabled);
+  renderStepsList();
 }
 
 // ============================================================
@@ -2154,11 +2434,24 @@ function renderStepsList() {
 // ============================================================
 
 function applySettingsState(state) {
+  if (typeof syncStepDefinitionsForMode === 'function') {
+    syncStepDefinitionsForMode(Boolean(state?.plusModeEnabled));
+  }
   syncLatestState(state);
   syncAutoRunState(state);
+  renderStepStatuses(latestState);
 
   inputEmail.value = state?.email || '';
   syncPasswordField(state || {});
+  if (typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled) {
+    inputPlusModeEnabled.checked = Boolean(state?.plusModeEnabled);
+  }
+  if (typeof inputPaypalEmail !== 'undefined' && inputPaypalEmail) {
+    inputPaypalEmail.value = state?.paypalEmail || '';
+  }
+  if (typeof inputPaypalPassword !== 'undefined' && inputPaypalPassword) {
+    inputPaypalPassword.value = state?.paypalPassword || '';
+  }
   inputVpsUrl.value = state?.vpsUrl || '';
   inputVpsPassword.value = state?.vpsPassword || '';
   setLocalCpaStep9Mode(state?.localCpaStep9Mode);
@@ -2204,6 +2497,12 @@ function applySettingsState(state) {
   }
   if (selectIcloudFetchMode) {
     selectIcloudFetchMode.value = normalizeIcloudFetchMode(state?.icloudFetchMode);
+  }
+  if (selectIcloudTargetMailboxType) {
+    selectIcloudTargetMailboxType.value = normalizeIcloudTargetMailboxType(state?.icloudTargetMailboxType);
+  }
+  if (selectIcloudForwardMailProvider) {
+    selectIcloudForwardMailProvider.value = normalizeIcloudForwardMailProvider(state?.icloudForwardMailProvider);
   }
   if (checkboxAutoDeleteIcloud) {
     checkboxAutoDeleteIcloud.checked = Boolean(state?.autoDeleteUsedIcloudAlias);
@@ -2277,6 +2576,9 @@ function applySettingsState(state) {
   updateFallbackThreadIntervalInputState();
   updateAccountRunHistorySettingsUI();
   updatePhoneVerificationSettingsUI();
+  if (typeof updatePlusModeUI === 'function') {
+    updatePlusModeUI();
+  }
   updatePanelModeUI();
   updateMailProviderUI();
   if (isLuckmailProvider(state?.mailProvider)) {
@@ -2594,6 +2896,15 @@ function getContributionUpdatePromptLines(snapshot = currentContributionContentS
   }
 
   const items = Array.isArray(snapshot.items) ? snapshot.items : [];
+  const autoRunNoticeItem = items.find((item) =>
+    item
+    && String(item.slug || '').trim().toLowerCase() === 'auto_run_notice'
+  );
+  if (autoRunNoticeItem) {
+    const noticeText = String(autoRunNoticeItem.text || '').trim();
+    return autoRunNoticeItem.isVisible && noticeText ? [noticeText] : [];
+  }
+
   const hasAnnouncementOrTutorial = items.some((item) =>
     item
     && item.isVisible
@@ -2613,35 +2924,6 @@ function getContributionUpdatePromptLines(snapshot = currentContributionContentS
     lines.push('有新的征求意见，请佬友共同参与选择。');
   }
   return lines;
-}
-
-function shouldPromptContributionUpdateBeforeAutoRun(snapshot = currentContributionContentSnapshot) {
-  const promptVersion = String(snapshot?.promptVersion || '').trim();
-  if (!promptVersion) {
-    return false;
-  }
-  if (promptVersion === getDismissedContributionContentPromptVersion()) {
-    return false;
-  }
-  return getContributionUpdatePromptLines(snapshot).length > 0;
-}
-
-async function maybeConfirmContributionUpdateBeforeAutoRun(snapshot = currentContributionContentSnapshot) {
-  if (!shouldPromptContributionUpdateBeforeAutoRun(snapshot)) {
-    return true;
-  }
-
-  const confirmed = await openConfirmModal({
-    title: '自动前提醒',
-    message: getContributionUpdateHintMessage(snapshot),
-    confirmLabel: '确定继续',
-    confirmVariant: 'btn-primary',
-  });
-  if (!confirmed) {
-    return false;
-  }
-  dismissContributionUpdateHint();
-  return true;
 }
 
 function positionContributionUpdateHint() {
@@ -2681,6 +2963,9 @@ function shouldShowContributionUpdateHint(snapshot = currentContributionContentS
     return false;
   }
   if (!promptVersion) {
+    return false;
+  }
+  if (!getContributionUpdatePromptLines(snapshot).length) {
     return false;
   }
   if (promptVersion === getDismissedContributionContentPromptVersion()) {
@@ -2882,6 +3167,7 @@ function getCustomMailProviderUiCopy() {
 
 function getCustomVerificationPromptCopy(step) {
   const verificationLabel = step === 4 ? '注册验证码' : '登录验证码';
+  const isLoginVerificationStep = step === 8 || step === 11;
   return {
     title: `手动处理${verificationLabel}`,
     message: `当前邮箱服务为“自定义邮箱”。请先在页面中手动输入${verificationLabel}，并确认已经进入下一页面后，再点击确认。`,
@@ -2889,7 +3175,7 @@ function getCustomVerificationPromptCopy(step) {
       text: `点击确认后会跳过步骤 ${step}。`,
       tone: 'danger',
     },
-    ...(step === 8 ? {
+    ...(isLoginVerificationStep ? {
       phoneActionLabel: '出现手机号验证',
       phoneActionAlert: {
         text: '如果当前页面已经进入手机号验证，可直接标记为失败并继续下一个邮箱。',
@@ -2901,7 +3187,7 @@ function getCustomVerificationPromptCopy(step) {
 
 async function openCustomVerificationConfirmDialog(step) {
   const promptCopy = getCustomVerificationPromptCopy(step);
-  if (step === 8) {
+  if (step === 8 || step === 11) {
     return openActionModal({
       title: promptCopy.title,
       message: promptCopy.message,
@@ -3109,6 +3395,21 @@ function updateMailLoginButtonState() {
 }
 
 function updateMailProviderUI() {
+  const normalizeIcloudHostValue = typeof normalizeIcloudHost === 'function'
+    ? normalizeIcloudHost
+    : ((value) => {
+      const normalized = String(value || '').trim().toLowerCase();
+      return normalized === 'icloud.com' || normalized === 'icloud.com.cn' ? normalized : '';
+    });
+  const icloudTargetMailboxTypeValue = typeof selectIcloudTargetMailboxType !== 'undefined'
+    ? selectIcloudTargetMailboxType?.value
+    : latestState?.icloudTargetMailboxType;
+  const icloudForwardMailProviderValue = typeof selectIcloudForwardMailProvider !== 'undefined'
+    ? selectIcloudForwardMailProvider?.value
+    : latestState?.icloudForwardMailProvider;
+  const icloudHostPreferenceValue = typeof selectIcloudHostPreference !== 'undefined'
+    ? selectIcloudHostPreference?.value
+    : latestState?.icloudHostPreference;
   const use2925 = selectMailProvider.value === '2925';
   const useGmail = selectMailProvider.value === GMAIL_PROVIDER;
   const useMail2925 = selectMailProvider.value === '2925';
@@ -3170,6 +3471,15 @@ function updateMailProviderUI() {
   const showCloudflareDomain = useEmailGenerator && useCloudflare;
   const showCloudflareTempEmailSettings = useCloudflareTempEmailProvider || (useEmailGenerator && useCloudflareTempEmailGenerator);
   const showCloudflareTempEmailReceiveMailbox = useCloudflareTempEmailProvider && !useCloudflareTempEmailGenerator;
+  const selectedIcloudHost = typeof getSelectedIcloudHostPreference === 'function'
+    ? getSelectedIcloudHostPreference()
+    : (normalizeIcloudHostValue(icloudHostPreferenceValue || latestState?.icloudHostPreference || '')
+      || normalizeIcloudHostValue(latestState?.preferredIcloudHost)
+      || 'icloud.com');
+  const icloudTargetMailboxType = normalizeIcloudTargetMailboxType(icloudTargetMailboxTypeValue);
+  const isIcloudComCnHost = selectedIcloudHost === 'icloud.com.cn';
+  const showIcloudTargetMailboxType = useIcloudProvider;
+  const showIcloudForwardMailProvider = useIcloudProvider && icloudTargetMailboxType === 'forward-mailbox';
   const showCloudflareTempEmailRandomSubdomainToggle = useEmailGenerator && useCloudflareTempEmailGenerator;
   const showCloudflareTempEmailDomain = useEmailGenerator && useCloudflareTempEmailGenerator;
   if (rowEmailGenerator) {
@@ -3190,6 +3500,12 @@ function updateMailProviderUI() {
     if (!showIcloudSection) {
       hideIcloudLoginHelp();
     }
+  }
+  if (typeof rowIcloudTargetMailboxType !== 'undefined' && rowIcloudTargetMailboxType) {
+    rowIcloudTargetMailboxType.style.display = showIcloudTargetMailboxType ? '' : 'none';
+  }
+  if (typeof rowIcloudForwardMailProvider !== 'undefined' && rowIcloudForwardMailProvider) {
+    rowIcloudForwardMailProvider.style.display = showIcloudForwardMailProvider ? '' : 'none';
   }
   rowCfDomain.style.display = showCloudflareDomain ? '' : 'none';
   const { domains } = getCloudflareDomainsFromState();
@@ -3306,6 +3622,13 @@ function updateMailProviderUI() {
   if (autoHintText && showCloudflareTempEmailRandomSubdomainToggle && inputTempEmailUseRandomSubdomain?.checked) {
     autoHintText.textContent = '已启用随机子域名：扩展会按当前选中的 Temp 域名提交，并额外携带 enableRandomSubdomain；是否生效取决于后端 RANDOM_SUBDOMAIN_DOMAINS 配置。';
   }
+  if (autoHintText && useIcloudProvider && showIcloudForwardMailProvider) {
+    const forwardProvider = normalizeIcloudForwardMailProvider(icloudForwardMailProviderValue);
+    const forwardProviderLabel = ICLOUD_FORWARD_MAIL_PROVIDER_LABELS[forwardProvider]
+      || MAIL_PROVIDER_LOGIN_CONFIGS[forwardProvider]?.label
+      || '目标邮箱';
+    autoHintText.textContent = `iCloud ${isIcloudComCnHost ? 'com.cn' : ''} 当前使用转发收码：第 4/8 步会从 ${forwardProviderLabel} 轮询验证码。`;
+  }
   if (useHotmail) {
     inputEmail.value = getCurrentHotmailEmail();
   } else if (useLuckmail) {
@@ -3421,9 +3744,6 @@ function updatePanelModeUI() {
 // ============================================================
 
 function updateStepUI(step, status) {
-  const statusEl = document.querySelector(`.step-status[data-step="${step}"]`);
-  const row = document.querySelector(`.step-row[data-step="${step}"]`);
-
   syncLatestState({
     stepStatuses: {
       ...getStepStatuses(),
@@ -3431,14 +3751,29 @@ function updateStepUI(step, status) {
     },
   });
 
-  if (statusEl) statusEl.textContent = STATUS_ICONS[status] || '';
-  if (row) {
-    row.className = `step-row ${status}`;
-  }
-
+  renderSingleStepStatus(step, status);
   updateButtonStates();
   updateProgressCounter();
   updateConfigMenuControls();
+}
+
+function renderSingleStepStatus(step, status) {
+  const normalizedStatus = status || 'pending';
+  const statusEl = document.querySelector(`.step-status[data-step="${step}"]`);
+  const row = document.querySelector(`.step-row[data-step="${step}"]`);
+
+  if (statusEl) statusEl.textContent = STATUS_ICONS[normalizedStatus] || '';
+  if (row) {
+    row.className = `step-row ${normalizedStatus}`;
+  }
+}
+
+function renderStepStatuses(state = latestState) {
+  const statuses = getStepStatuses(state);
+  for (const step of STEP_IDS) {
+    renderSingleStepStatus(step, statuses[step]);
+  }
+  updateProgressCounter();
 }
 
 function updateProgressCounter() {
@@ -3451,6 +3786,9 @@ function updateButtonStates() {
   const anyRunning = Object.values(statuses).some(s => s === 'running');
   const autoLocked = isAutoRunLockedPhase();
   const autoScheduled = isAutoRunScheduledPhase();
+  const icloudTargetMailboxTypeValue = typeof selectIcloudTargetMailboxType !== 'undefined'
+    ? selectIcloudTargetMailboxType?.value
+    : latestState?.icloudTargetMailboxType;
 
   for (const step of STEP_IDS) {
     const btn = document.querySelector(`.step-btn[data-step="${step}"]`);
@@ -3500,6 +3838,15 @@ function updateButtonStates() {
   if (btnIcloudRefresh) btnIcloudRefresh.disabled = disableIcloudControls;
   if (btnIcloudDeleteUsed) btnIcloudDeleteUsed.disabled = disableIcloudControls || !hasDeletableUsedIcloudAliases();
   if (selectIcloudHostPreference) selectIcloudHostPreference.disabled = disableIcloudControls;
+  if (typeof selectIcloudTargetMailboxType !== 'undefined' && selectIcloudTargetMailboxType) {
+    selectIcloudTargetMailboxType.disabled = disableIcloudControls;
+  }
+  if (typeof selectIcloudForwardMailProvider !== 'undefined' && selectIcloudForwardMailProvider) {
+    const normalizedIcloudTargetMailboxType = normalizeIcloudTargetMailboxType(icloudTargetMailboxTypeValue);
+    const allowIcloudForwardMailProvider = isIcloudMailProvider()
+      && normalizedIcloudTargetMailboxType === 'forward-mailbox';
+    selectIcloudForwardMailProvider.disabled = disableIcloudControls || !allowIcloudForwardMailProvider;
+  }
   if (selectIcloudFetchMode) {
     const allowIcloudFetchMode = getSelectedEmailGenerator() === ICLOUD_PROVIDER
       && !isCustomMailProvider()
@@ -3958,6 +4305,7 @@ const contributionModeManager = window.SidepanelContributionMode?.createContribu
     btnOpenAccountRecords,
     btnOpenContributionUpload,
     btnStartContribution,
+    contributionModeBadge,
     contributionModePanel,
     contributionModeSummary,
     contributionModeText,
@@ -4377,16 +4725,10 @@ autoStartModal?.addEventListener('click', (event) => {
 btnAutoStartClose?.addEventListener('click', () => resolveModalChoice(null));
 
 async function startAutoRunFromCurrentSettings() {
-  let contributionSnapshot = null;
   try {
-    contributionSnapshot = await refreshContributionContentHint();
+    await refreshContributionContentHint();
   } catch (error) {
     console.warn('Failed to refresh contribution content hint before auto run:', error);
-  }
-
-  const confirmedContributionUpdate = await maybeConfirmContributionUpdateBeforeAutoRun(contributionSnapshot);
-  if (!confirmedContributionUpdate) {
-    return false;
   }
 
   if (typeof settingsDirty !== 'undefined' && settingsDirty && typeof saveSettings === 'function') {
@@ -4405,6 +4747,9 @@ async function startAutoRunFromCurrentSettings() {
   if (lockedRunCount > 0) {
     inputRunCount.value = String(lockedRunCount);
   }
+  const plusModeEnabled = typeof inputPlusModeEnabled !== 'undefined' && inputPlusModeEnabled
+    ? Boolean(inputPlusModeEnabled.checked)
+    : Boolean(currentPlusModeEnabled || latestState?.plusModeEnabled);
   let mode = 'restart';
   const autoRunSkipFailures = inputAutoSkipFailures.checked;
   const contributionNickname = String(inputContributionNickname?.value || '').trim();
@@ -4424,6 +4769,11 @@ async function startAutoRunFromCurrentSettings() {
     mode = choice;
   }
 
+  const confirmedPlusContributionPrompt = await maybeShowPlusContributionPromptBeforeAutoRun(plusModeEnabled);
+  if (!confirmedPlusContributionPrompt) {
+    return false;
+  }
+
   if (shouldWarnAutoRunFallbackRisk(totalRuns, autoRunSkipFailures)
     && !isAutoRunFallbackRiskPromptDismissed()) {
     const result = await openAutoRunFallbackRiskConfirmModal(totalRuns);
@@ -4432,6 +4782,17 @@ async function startAutoRunFromCurrentSettings() {
     }
     if (result.dismissPrompt) {
       setAutoRunFallbackRiskPromptDismissed(true);
+    }
+  }
+
+  if (shouldWarnPlusAutoRunRisk(totalRuns, plusModeEnabled)
+    && !isAutoRunPlusRiskPromptDismissed()) {
+    const result = await openPlusAutoRunRiskConfirmModal(totalRuns);
+    if (!result.confirmed) {
+      return false;
+    }
+    if (result.dismissPrompt) {
+      setAutoRunPlusRiskPromptDismissed(true);
     }
   }
 
@@ -4651,6 +5012,23 @@ inputPassword.addEventListener('blur', () => {
   saveSettings({ silent: true }).catch(() => { });
 });
 
+inputPlusModeEnabled?.addEventListener('change', () => {
+  updatePlusModeUI();
+  syncStepDefinitionsForMode(Boolean(inputPlusModeEnabled.checked), { render: true });
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+[inputPaypalEmail, inputPaypalPassword].forEach((input) => {
+  input?.addEventListener('input', () => {
+    markSettingsDirty(true);
+    scheduleSettingsAutoSave();
+  });
+  input?.addEventListener('blur', () => {
+    saveSettings({ silent: true }).catch(() => { });
+  });
+});
+
 selectMailProvider.addEventListener('change', async () => {
   const previousProvider = latestState?.mailProvider || '';
   const previousMail2925Mode = latestState?.mail2925Mode;
@@ -4718,11 +5096,24 @@ selectEmailGenerator.addEventListener('change', () => {
 });
 
 selectIcloudHostPreference?.addEventListener('change', () => {
+  updateMailProviderUI();
   markSettingsDirty(true);
   saveSettings({ silent: true }).catch(() => { });
   if (getSelectedEmailGenerator() === 'icloud') {
     queueIcloudAliasRefresh();
   }
+});
+
+selectIcloudTargetMailboxType?.addEventListener('change', () => {
+  updateMailProviderUI();
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
+});
+
+selectIcloudForwardMailProvider?.addEventListener('change', () => {
+  updateMailProviderUI();
+  markSettingsDirty(true);
+  saveSettings({ silent: true }).catch(() => { });
 });
 
 selectIcloudFetchMode?.addEventListener('change', () => {
@@ -5309,6 +5700,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         selectIcloudHostPreference.value = hostPreference === 'icloud.com'
           ? 'icloud.com'
           : (hostPreference === 'icloud.com.cn' ? 'icloud.com.cn' : 'auto');
+        updateMailProviderUI();
+      }
+      if (message.payload.icloudTargetMailboxType !== undefined && selectIcloudTargetMailboxType) {
+        selectIcloudTargetMailboxType.value = normalizeIcloudTargetMailboxType(message.payload.icloudTargetMailboxType);
+        updateMailProviderUI();
+      }
+      if (message.payload.icloudForwardMailProvider !== undefined && selectIcloudForwardMailProvider) {
+        selectIcloudForwardMailProvider.value = normalizeIcloudForwardMailProvider(message.payload.icloudForwardMailProvider);
+        updateMailProviderUI();
       }
       if (message.payload.icloudFetchMode !== undefined && selectIcloudFetchMode) {
         selectIcloudFetchMode.value = normalizeIcloudFetchMode(message.payload.icloudFetchMode);

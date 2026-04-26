@@ -86,3 +86,36 @@ test('getContributionUpdateHintMessage returns questionnaire prompt alone when o
 
   assert.equal(message, '有新的征求意见，请佬友共同参与选择。');
 });
+
+test('getContributionUpdateHintMessage uses managed auto run notice text when available', () => {
+  const message = api.getContributionUpdateHintMessage({
+    promptVersion: 'auto_run_notice:2026-04-23T00:00:01Z',
+    items: [
+      {
+        slug: 'auto_run_notice',
+        isVisible: true,
+        text: '公告和使用教程更新了，可点上方“贡献/使用教程”查看。',
+      },
+      { slug: 'announcement', isVisible: true },
+      { slug: 'questionnaire', isVisible: true },
+    ],
+  });
+
+  assert.equal(message, '公告和使用教程更新了，可点上方“贡献/使用教程”查看。');
+});
+
+test('getContributionUpdateHintMessage suppresses managed auto run notice when it is disabled', () => {
+  const message = api.getContributionUpdateHintMessage({
+    promptVersion: 'announcement:2026-04-23T00:00:00Z',
+    items: [
+      {
+        slug: 'auto_run_notice',
+        isVisible: false,
+        text: '公告和使用教程更新了，可点上方“贡献/使用教程”查看。',
+      },
+      { slug: 'announcement', isVisible: true },
+    ],
+  });
+
+  assert.equal(message, '');
+});

@@ -1,6 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const {
+  normalizeIcloudForwardMailProvider,
+  normalizeIcloudTargetMailboxType,
+} = require('../mail-provider-utils');
 
 const source = fs.readFileSync('sidepanel/sidepanel.js', 'utf8');
 
@@ -172,7 +176,7 @@ return {
 test('updateMailProviderUI keeps the temp domain selector visible and updates the hint when random subdomain is enabled', () => {
   const bundle = extractFunction('updateMailProviderUI');
 
-  const api = new Function(`
+  const api = new Function('normalizeIcloudTargetMailboxType', 'normalizeIcloudForwardMailProvider', `
 let latestState = {
   cloudflareTempEmailDomains: ['mail.example.com'],
 };
@@ -254,7 +258,7 @@ return {
   autoHintText,
   calls,
 };
-  `)();
+  `)(normalizeIcloudTargetMailboxType, normalizeIcloudForwardMailProvider);
 
   api.updateMailProviderUI();
   assert.equal(api.cloudflareTempEmailSection.style.display, '');

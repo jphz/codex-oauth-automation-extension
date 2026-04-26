@@ -79,23 +79,15 @@ test('getContentUpdateSnapshot returns a prompt version for visible contribution
       async json() {
         return {
           ok: true,
-          prompt_version: 'announcement:2026-04-21T12:00:00Z|tutorial:2026-04-21T12:05:00Z',
+          prompt_version: 'auto_run_notice:2026-04-21T12:05:00Z',
           has_visible_updates: true,
           latest_updated_at: '2026-04-21T12:05:00Z',
           latest_updated_at_display: '2026-04-21 20:05',
           items: [
             {
-              slug: 'announcement',
-              title: '最新公告',
-              is_enabled: true,
-              has_content: true,
-              is_visible: true,
-              updated_at: '2026-04-21T12:00:00Z',
-              updated_at_display: '2026-04-21 20:00',
-            },
-            {
-              slug: 'tutorial',
-              title: '使用教程',
+              slug: 'auto_run_notice',
+              title: '自动提示',
+              text: '公告和使用教程更新了，可点上方“贡献/使用教程”查看。',
               is_enabled: true,
               has_content: true,
               is_visible: true,
@@ -111,13 +103,13 @@ test('getContentUpdateSnapshot returns a prompt version for visible contribution
   const snapshot = await api.getContentUpdateSnapshot();
 
   assert.equal(snapshot.status, 'update-available');
-  assert.equal(snapshot.promptVersion, 'announcement:2026-04-21T12:00:00Z|tutorial:2026-04-21T12:05:00Z');
+  assert.equal(snapshot.promptVersion, 'auto_run_notice:2026-04-21T12:05:00Z');
   assert.equal(snapshot.hasVisibleUpdates, true);
   assert.equal(snapshot.latestUpdatedAt, '2026-04-21T12:05:00Z');
-  assert.equal(snapshot.items.length, 2);
+  assert.equal(snapshot.items.length, 1);
   assert.deepEqual(
-    snapshot.items.map((item) => [item.slug, item.isVisible]),
-    [['announcement', true], ['tutorial', true]]
+    snapshot.items.map((item) => [item.slug, item.isVisible, item.text]),
+    [['auto_run_notice', true, '公告和使用教程更新了，可点上方“贡献/使用教程”查看。']]
   );
 });
 

@@ -1,6 +1,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const {
+  normalizeIcloudForwardMailProvider,
+  normalizeIcloudTargetMailboxType,
+} = require('../mail-provider-utils');
 
 const sidepanelSource = fs.readFileSync('sidepanel/sidepanel.js', 'utf8');
 
@@ -90,7 +94,7 @@ return {
 });
 
 test('collectSettingsPayload keeps local helper sync enabled while persisting sms toggle state', () => {
-  const api = new Function(`
+  const api = new Function('normalizeIcloudTargetMailboxType', 'normalizeIcloudForwardMailProvider', `
 let latestState = {
   contributionMode: false,
   mail2925UseAccountPool: false,
@@ -168,7 +172,7 @@ ${extractFunction('normalizeHeroSmsCountryLabel')}
 ${extractFunction('getSelectedHeroSmsCountryOption')}
 ${extractFunction('collectSettingsPayload')}
 return { collectSettingsPayload };
-`)();
+`)(normalizeIcloudTargetMailboxType, normalizeIcloudForwardMailProvider);
 
   const payload = api.collectSettingsPayload();
 

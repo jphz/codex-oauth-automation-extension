@@ -80,3 +80,28 @@ return { detectScriptSource };
     'mail-163'
   );
 });
+
+test('shouldReportReadyForFrame suppresses noisy plus checkout child frame ready logs', () => {
+  const bundle = [extractFunction('shouldReportReadyForFrame')].join('\n');
+  const api = new Function(`
+${bundle}
+return { shouldReportReadyForFrame };
+`)();
+
+  assert.equal(api.shouldReportReadyForFrame('plus-checkout', true), false);
+  assert.equal(api.shouldReportReadyForFrame('plus-checkout', false), true);
+  assert.equal(api.shouldReportReadyForFrame('paypal-flow', true), true);
+});
+
+test('getRuntimeScriptSource follows injected source overrides after utils is already loaded', () => {
+  const bundle = [extractFunction('getRuntimeScriptSource')].join('\n');
+  const api = new Function('window', 'SCRIPT_SOURCE', `
+${bundle}
+return { getRuntimeScriptSource };
+`);
+
+  const windowRef = {};
+  assert.equal(api(windowRef, 'chatgpt').getRuntimeScriptSource(), 'chatgpt');
+  windowRef.__MULTIPAGE_SOURCE = 'plus-checkout';
+  assert.equal(api(windowRef, 'chatgpt').getRuntimeScriptSource(), 'plus-checkout');
+});

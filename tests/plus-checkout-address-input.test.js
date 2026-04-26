@@ -1,8 +1,42 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const vm = require('node:vm');
 
 const source = fs.readFileSync('content/plus-checkout.js', 'utf8');
+
+test('plus checkout content script can be injected repeatedly on the same page', () => {
+  const attrs = new Map();
+  const context = {
+    console: { log() {}, warn() {}, error() {}, info() {} },
+    location: { href: 'https://chatgpt.com/' },
+    window: {},
+    document: {
+      documentElement: {
+        getAttribute(name) {
+          return attrs.get(name) || null;
+        },
+        setAttribute(name, value) {
+          attrs.set(name, String(value));
+        },
+      },
+    },
+    chrome: {
+      runtime: {
+        onMessage: {
+          addListener() {},
+        },
+      },
+    },
+  };
+  context.window = context;
+  vm.createContext(context);
+
+  vm.runInContext(source, context);
+  vm.runInContext(source, context);
+
+  assert.equal(context.__MULTIPAGE_PLUS_CHECKOUT_READY__, true);
+});
 
 function extractFunction(name) {
   const plainStart = source.indexOf(`function ${name}(`);

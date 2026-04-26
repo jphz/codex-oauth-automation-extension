@@ -1,5 +1,6 @@
 // content/plus-checkout.js — ChatGPT Plus checkout helper.
 
+(function attachPlusCheckoutContentScript() {
 console.log('[MultiPage:plus-checkout] Content script loaded on', location.href);
 window.__MULTIPAGE_PLUS_CHECKOUT_READY__ = true;
 
@@ -1121,3 +1122,4 @@ function inspectPlusCheckoutState() {
     },
   };
 }
+})();

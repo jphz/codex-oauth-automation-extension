@@ -1,8 +1,42 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const vm = require('node:vm');
 
 const source = fs.readFileSync('content/plus-checkout.js', 'utf8');
+
+test('plus checkout content script can be injected repeatedly on the same page', () => {
+  const attrs = new Map();
+  const context = {
+    console: { log() {}, warn() {}, error() {}, info() {} },
+    location: { href: 'https://chatgpt.com/' },
+    window: {},
+    document: {
+      documentElement: {
+        getAttribute(name) {
+          return attrs.get(name) || null;
+        },
+        setAttribute(name, value) {
+          attrs.set(name, String(value));
+        },
+      },
+    },
+    chrome: {
+      runtime: {
+        onMessage: {
+          addListener() {},
+        },
+      },
+    },
+  };
+  context.window = context;
+  vm.createContext(context);
+
+  vm.runInContext(source, context);
+  vm.runInContext(source, context);
+
+  assert.equal(context.__MULTIPAGE_PLUS_CHECKOUT_READY__, true);
+});
 
 function extractFunction(name) {
   const plainStart = source.indexOf(`function ${name}(`);
@@ -252,4 +286,90 @@ return { selectRegionDropdown };
   await api.selectRegionDropdown(stateDropdown, 'Western Australia');
 
   assert.deepEqual(clicks, [stateDropdown, options[1]]);
+});
+
+test('country and region helpers recognize the dropdown-style localized address form', () => {
+  const bundle = [
+    extractFunction('isVisibleElement'),
+    extractFunction('normalizeText'),
+    extractFunction('getActionText'),
+    extractFunction('getFieldText'),
+    extractFunction('getVisibleControls'),
+    extractFunction('isEnabledControl'),
+    extractFunction('isDocumentLevelContainer'),
+    extractFunction('getCountryCandidates'),
+    extractFunction('matchesCountryOption'),
+    extractFunction('findCountryDropdown'),
+    extractFunction('getRegionCandidates'),
+    extractFunction('matchesRegionOption'),
+    extractFunction('findRegionDropdown'),
+  ].join('\n');
+
+  const countryDropdown = createElement({
+    tagName: 'DIV',
+    text: '国家或地区 日本',
+    attrs: {
+      role: 'combobox',
+      'aria-haspopup': 'listbox',
+    },
+  });
+  const regionDropdown = createElement({
+    tagName: 'DIV',
+    text: '辖区 选择',
+    attrs: {
+      role: 'combobox',
+      'aria-haspopup': 'listbox',
+    },
+  });
+  const elements = [countryDropdown, regionDropdown];
+  const documentMock = {
+    documentElement: {},
+    body: {},
+    querySelectorAll: (selector) => {
+      if (String(selector || '').includes('label[for=')) return [];
+      if (String(selector || '').includes('combobox') || String(selector || '').includes('button') || String(selector || '').includes('select')) {
+        return elements;
+      }
+      return [];
+    },
+  };
+  const windowMock = {
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
+  };
+  const cssMock = {
+    escape: (value) => String(value),
+  };
+
+  const api = new Function('window', 'document', 'CSS', `
+${bundle}
+return { findCountryDropdown, findRegionDropdown, matchesCountryOption, matchesRegionOption };
+`)(windowMock, documentMock, cssMock);
+
+  assert.equal(api.findCountryDropdown(), countryDropdown);
+  assert.equal(api.findRegionDropdown(), regionDropdown);
+  assert.equal(api.matchesCountryOption('日本', 'JP'), true);
+  assert.equal(api.matchesCountryOption('德国', 'DE'), true);
+  assert.equal(api.matchesRegionOption('東京都', 'Tokyo'), true);
+});
+
+test('fillIfEmpty can overwrite invalid structured address values in the dropdown branch', () => {
+  const bundle = [
+    extractFunction('fillIfEmpty'),
+  ].join('\n');
+  const input = { value: '77022' };
+  const writes = [];
+  const api = new Function('input', 'writes', `
+function fillInput(el, value) {
+  writes.push(value);
+  el.value = value;
+}
+${bundle}
+return { fillIfEmpty };
+`)(input, writes);
+
+  assert.equal(api.fillIfEmpty(input, '100-0005'), false);
+  assert.equal(input.value, '77022');
+  assert.equal(api.fillIfEmpty(input, '100-0005', { overwrite: true }), true);
+  assert.equal(input.value, '100-0005');
+  assert.deepEqual(writes, ['100-0005']);
 });

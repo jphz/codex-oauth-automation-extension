@@ -34,6 +34,10 @@ const SCRIPT_SOURCE = (() => {
   });
 })();
 
+function getRuntimeScriptSource() {
+  return window.__MULTIPAGE_SOURCE || SCRIPT_SOURCE;
+}
+
 const LOG_PREFIX = `[MultiPage:${SCRIPT_SOURCE}]`;
 const STOP_ERROR_MESSAGE = '流程已被用户停止。';
 let flowStopped = false;
@@ -51,7 +55,8 @@ if (!window.__MULTIPAGE_UTILS_LISTENER_READY__) {
     if (message.type === 'PING') {
       sendResponse({
         ok: true,
-        source: SCRIPT_SOURCE,
+        source: getRuntimeScriptSource(),
+        plusCheckoutReady: Boolean(window.__MULTIPAGE_PLUS_CHECKOUT_READY__),
       });
     }
   });
@@ -265,7 +270,7 @@ function fillSelect(el, value) {
 function log(message, level = 'info') {
   chrome.runtime.sendMessage({
     type: 'LOG',
-    source: SCRIPT_SOURCE,
+    source: getRuntimeScriptSource(),
     step: null,
     payload: { message, level, timestamp: Date.now() },
     error: null,
@@ -279,7 +284,7 @@ function reportReady() {
   console.log(LOG_PREFIX, '内容脚本已就绪');
   const message = {
     type: 'CONTENT_SCRIPT_READY',
-    source: SCRIPT_SOURCE,
+    source: getRuntimeScriptSource(),
     step: null,
     payload: {},
     error: null,
@@ -303,7 +308,7 @@ function reportComplete(step, data = {}) {
   log(`步骤 ${step} 已成功完成`, 'ok');
   const message = {
     type: 'STEP_COMPLETE',
-    source: SCRIPT_SOURCE,
+    source: getRuntimeScriptSource(),
     step,
     payload: data,
     error: null,
@@ -334,7 +339,7 @@ function reportError(step, errorMessage) {
   log(`步骤 ${step} 失败：${errorMessage}`, 'error');
   const message = {
     type: 'STEP_ERROR',
-    source: SCRIPT_SOURCE,
+    source: getRuntimeScriptSource(),
     step,
     payload: {},
     error: errorMessage,
@@ -435,6 +440,6 @@ function shouldReportReadyForFrame(source, isChildFrame) {
 
 // Auto-report ready on load. Child frames are probed explicitly by frameId, so
 // they should not overwrite the tab-level registration or spam the side panel.
-if (shouldReportReadyForFrame(SCRIPT_SOURCE, window !== window.top)) {
+if (shouldReportReadyForFrame(getRuntimeScriptSource(), window !== window.top)) {
   reportReady();
 }

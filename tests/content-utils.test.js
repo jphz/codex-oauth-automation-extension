@@ -92,3 +92,16 @@ return { shouldReportReadyForFrame };
   assert.equal(api.shouldReportReadyForFrame('plus-checkout', false), true);
   assert.equal(api.shouldReportReadyForFrame('paypal-flow', true), true);
 });
+
+test('getRuntimeScriptSource follows injected source overrides after utils is already loaded', () => {
+  const bundle = [extractFunction('getRuntimeScriptSource')].join('\n');
+  const api = new Function('window', 'SCRIPT_SOURCE', `
+${bundle}
+return { getRuntimeScriptSource };
+`);
+
+  const windowRef = {};
+  assert.equal(api(windowRef, 'chatgpt').getRuntimeScriptSource(), 'chatgpt');
+  windowRef.__MULTIPAGE_SOURCE = 'plus-checkout';
+  assert.equal(api(windowRef, 'chatgpt').getRuntimeScriptSource(), 'plus-checkout');
+});

@@ -4122,6 +4122,19 @@ async function ensureContentScriptReadyOnTab(source, tabId, options = {}) {
   return tabRuntime.ensureContentScriptReadyOnTab(source, tabId, options);
 }
 
+function isContentScriptReadyPong(source, pong) {
+  if (!pong?.ok) return false;
+  if (pong.source && pong.source !== source) return false;
+  if (source === 'plus-checkout') {
+    return Boolean(pong.plusCheckoutReady);
+  }
+  return true;
+}
+
+function isUnrecoverableContentScriptInjectError(error) {
+  return /Could not load file/i.test(String(error?.message || error || ''));
+}
+
 async function ensureContentScriptReadyOnTabUntilStopped(source, tabId, options = {}) {
   const {
     inject = null,
@@ -4134,7 +4147,7 @@ async function ensureContentScriptReadyOnTabUntilStopped(source, tabId, options 
   while (true) {
     throwIfStopped();
     const pong = await pingContentScriptOnTab(tabId);
-    if (pong?.ok && (!pong.source || pong.source === source)) {
+    if (isContentScriptReadyPong(source, pong)) {
       await registerTab(source, tabId);
       return;
     }
@@ -4159,10 +4172,13 @@ async function ensureContentScriptReadyOnTabUntilStopped(source, tabId, options 
       });
     } catch (error) {
       console.warn(LOG_PREFIX, `[ensureContentScriptReadyOnTabUntilStopped] inject failed for ${source}:`, error?.message || error);
+      if (isUnrecoverableContentScriptInjectError(error)) {
+        throw new Error(`${getSourceLabel(source)} 内容脚本文件加载失败：${error?.message || error}。请在扩展管理页重新加载当前扩展，确认文件已包含在已加载的扩展目录中。`);
+      }
     }
 
     const pongAfterInject = await pingContentScriptOnTab(tabId);
-    if (pongAfterInject?.ok && (!pongAfterInject.source || pongAfterInject.source === source)) {
+    if (isContentScriptReadyPong(source, pongAfterInject)) {
       await registerTab(source, tabId);
       return;
     }
@@ -7051,6 +7067,9 @@ const plusCheckoutCreateExecutor = self.MultiPageBackgroundPlusCheckoutCreate?.c
   chrome,
   completeStepFromBackground,
   ensureContentScriptReadyOnTabUntilStopped,
+  getTabId,
+  isTabAlive,
+  registerTab,
   reuseOrCreateTab,
   sendTabMessageUntilStopped,
   setState,
